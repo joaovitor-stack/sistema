@@ -1,0 +1,20 @@
+/* src/index.css */
+
+@import "tailwindcss";
+
+/* O Tailwind v4 detecta automaticamente os arquivos no projeto Next/Vite, 
+   mas você pode reforçar se necessário: */
+@source "../src/**/*.{ts,tsx,js,jsx}";
+
+/* Plugins no v4 são importados como bibliotecas de CSS ou configurados no config.js.
+   Se o tw-animate-css estiver causando erro, remova-o temporariamente para testar. */
+@plugin "tailwindcss-animate"; 
+
+/* Adicione as camadas base se necessário */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    /* ... outras variáveis do seu tema */
+  }
+}

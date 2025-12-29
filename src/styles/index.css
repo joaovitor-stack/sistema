@@ -1,0 +1,4 @@
+@import './fonts.css';
+@import './theme.css';
+/* Remova o @import './tailwind.css' se ele for apenas as diretivas @tailwind base... 
+   Pois o @import "tailwindcss" no arquivo raiz já resolve isso. */

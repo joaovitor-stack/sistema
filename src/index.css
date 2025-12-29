@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Teste primeiro apenas com o tema para ver se o visual volta */
+@import "./styles/theme.css";
+
+/* Se o erro persistir no console, tente o caminho abaixo: */
+/* @import "./styles/fonts.css"; */
