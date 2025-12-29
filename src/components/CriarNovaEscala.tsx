@@ -172,7 +172,7 @@ export function CriarNovaEscala({ onSave, onBack }: CriarNovaEscalaProps) {
               <SelectContent className="bg-white">
                 <SelectItem value="Extrema">Extrema</SelectItem>
                 <SelectItem value="Bragança Paulista">Bragança Paulista</SelectItem>
-                <SelectItem value="Cambuí">Cambuí - Camanducaia</SelectItem>
+                <SelectItem value="Cambuí - Camanducaia">Cambuí - Camanducaia</SelectItem>
               </SelectContent>
             </Select>
           </div>
