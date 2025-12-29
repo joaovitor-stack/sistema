@@ -4,14 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { MapPin, Plus, Trash2, ArrowLeft, Save, Printer, Building2, Search, FileDown, Edit2, X, Calendar, Eye } from 'lucide-react';
+import { MapPin, Plus, Trash2, ArrowLeft, Save, Printer, Building2, Search, FileDown, Edit2, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from './ui/badge';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-
-const cn = (...inputs: any[]) => inputs.filter(Boolean).join(" ");
 
 // --- INTERFACES ---
 interface Parada {
@@ -29,6 +27,7 @@ interface Itinerario {
   nomeCliente: string;
   linhaId: string;
   nomeLinha: string;
+  garagem: string; // Adicionado
   turno: string;
   tipoVeiculo: string;
   diasSemana: string[];
@@ -52,7 +51,7 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   const [visualizarItin, setVisualizarItin] = useState<Itinerario | null>(null);
 
   const [novoItin, setNovoItin] = useState<Partial<Itinerario>>({
-    id: '', clienteId: '', nomeCliente: '', linhaId: '', nomeLinha: '', turno: '', tipoVeiculo: '', diasSemana: [], paradas: []
+    id: '', clienteId: '', nomeCliente: '', linhaId: '', nomeLinha: '', garagem: '', turno: '', tipoVeiculo: '', diasSemana: [], paradas: []
   });
 
   const [novaParada, setNovaParada] = useState<Partial<Parada>>({
@@ -71,7 +70,8 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   const itinerariosFiltrados = useMemo(() => {
     return itinerarios.filter(itin => 
       itin.nomeCliente.toLowerCase().includes(busca.toLowerCase()) ||
-      itin.nomeLinha.toLowerCase().includes(busca.toLowerCase())
+      itin.nomeLinha.toLowerCase().includes(busca.toLowerCase()) ||
+      itin.garagem?.toLowerCase().includes(busca.toLowerCase())
     );
   }, [busca, itinerarios]);
 
@@ -80,19 +80,20 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
     return linhasExistentes.filter(linha => linha.clienteId === novoItin.clienteId);
   }, [novoItin.clienteId, linhasExistentes]);
 
-  // --- FUNÇÕES DE EXPORTAÇÃO ---
+  // --- FUNÇÕES ---
   const handleExportarPDF = (itin: Itinerario) => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     doc.setFontSize(14);
     doc.text("MAXTOUR - FICHA DE ITINERÁRIO", 105, 15, { align: 'center' });
     doc.setFontSize(10);
-    doc.text(`CLIENTE: ${itin.nomeCliente.toUpperCase()}`, 14, 25);
-    doc.text(`LINHA: ${itin.nomeLinha.toUpperCase()}`, 14, 31);
-    doc.text(`TURNO: ${itin.turno} | VEÍCULO: ${itin.tipoVeiculo} | DIAS: ${itin.diasSemana.join(', ')}`, 14, 37);
+    doc.text(`GARAGEM: ${itin.garagem.toUpperCase()}`, 14, 25);
+    doc.text(`CLIENTE: ${itin.nomeCliente.toUpperCase()}`, 14, 31);
+    doc.text(`LINHA: ${itin.nomeLinha.toUpperCase()}`, 14, 37);
+    doc.text(`TURNO: ${itin.turno} | VEÍCULO: ${itin.tipoVeiculo} | DIAS: ${itin.diasSemana.join(', ')}`, 14, 43);
 
     const tableRows = itin.paradas.map(p => [p.ordem, p.horario, p.referencia.toUpperCase(), p.bairro.toUpperCase()]);
     autoTable(doc, {
-      startY: 43,
+      startY: 48,
       head: [['ORD', 'HORÁRIO', 'REFERÊNCIA / PONTO', 'BAIRRO']],
       body: tableRows,
       theme: 'grid',
@@ -124,7 +125,7 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   };
 
   const salvarItinerario = () => {
-    if (!novoItin.clienteId || !novoItin.linhaId) return toast.error("Preencha cliente e linha");
+    if (!novoItin.clienteId || !novoItin.linhaId || !novoItin.garagem) return toast.error("Preencha cliente, linha e garagem");
     let novaLista;
     const dataHoje = new Date().toISOString().split('T')[0];
 
@@ -139,13 +140,11 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
     setItinerarios(novaLista);
     localStorage.setItem('maxtour_itinerarios', JSON.stringify(novaLista));
     setModoEdicao(false);
-    setNovoItin({ id: '', clienteId: '', nomeCliente: '', linhaId: '', nomeLinha: '', turno: '', tipoVeiculo: '', diasSemana: [], paradas: [] });
+    setNovoItin({ id: '', clienteId: '', nomeCliente: '', linhaId: '', nomeLinha: '', garagem: '', turno: '', tipoVeiculo: '', diasSemana: [], paradas: [] });
   };
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
-      {/* ... (Estilo Print e Área de Impressão iguais) */}
-
       <div className="max-w-7xl mx-auto print:hidden">
         <header className="flex justify-between items-center mb-8">
           <div>
@@ -162,13 +161,66 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
         </header>
 
         {modoEdicao ? (
-          /* FORMULÁRIO DE EDIÇÃO */
           <div className="space-y-6">
             <Card className="border-orange-200">
                <CardHeader className="bg-orange-50/50 py-3"><CardTitle className="text-xs font-bold uppercase text-orange-800">Configuração da Linha</CardTitle></CardHeader>
                <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-                 {/* ... (Campos de Select iguais aos seus) */}
-                 <div className="md:col-span-4 flex flex-wrap gap-2">
+                 <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Garagem</label>
+                    <Select value={novoItin.garagem} onValueChange={(v) => setNovoItin({...novoItin, garagem: v})}>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                        <SelectContent className="bg-white">
+                            <SelectItem value="Extrema">Extrema</SelectItem>
+                            <SelectItem value="Bragança Paulista">Bragança Paulista</SelectItem>
+                            <SelectItem value="Cambuí - Camanducaia">Cambuí - Camanducaia</SelectItem>
+                        </SelectContent>
+                    </Select>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Cliente</label>
+                    <Select value={novoItin.clienteId} onValueChange={(v) => {
+                        const c = clientes.find(cl => cl.id === v);
+                        setNovoItin({...novoItin, clienteId: v, nomeCliente: c?.nome, linhaId: '', nomeLinha: ''});
+                    }}>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                        <SelectContent className="bg-white">
+                            {clientes.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Linha</label>
+                    <Select value={novoItin.linhaId} onValueChange={(v) => {
+                        const l = linhasExistentes.find(lin => lin.id === v);
+                        setNovoItin({...novoItin, linhaId: v, nomeLinha: l?.nome});
+                    }} disabled={!novoItin.clienteId}>
+                        <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                        <SelectContent className="bg-white">
+                            {linhasFiltradas.map(l => <SelectItem key={l.id} value={l.id}>{l.nome}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                 </div>
+                 <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500">Turno</label>
+                        <Select value={novoItin.turno} onValueChange={(v) => setNovoItin({...novoItin, turno: v})}>
+                            <SelectTrigger className="bg-white"><SelectValue placeholder="Turno" /></SelectTrigger>
+                            <SelectContent className="bg-white">
+                                <SelectItem value="T1">T1</SelectItem><SelectItem value="T2">T2</SelectItem><SelectItem value="T3">T3</SelectItem><SelectItem value="ADM">ADM</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500">Veículo</label>
+                        <Select value={novoItin.tipoVeiculo} onValueChange={(v) => setNovoItin({...novoItin, tipoVeiculo: v})}>
+                            <SelectTrigger className="bg-white"><SelectValue placeholder="Tipo" /></SelectTrigger>
+                            <SelectContent className="bg-white">
+                                <SelectItem value="Ônibus">Ônibus</SelectItem><SelectItem value="Micro">Micro</SelectItem><SelectItem value="Van">Van</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                 </div>
+                 <div className="md:col-span-4 flex flex-wrap gap-2 pt-2">
                     {DIAS_OPCOES.map(dia => (
                       <Button key={dia.id} type="button" variant={novoItin.diasSemana?.includes(dia.id) ? "default" : "outline"} className="h-8 text-[10px]" onClick={() => {
                         const atuais = novoItin.diasSemana || [];
@@ -178,22 +230,47 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                  </div>
                </CardContent>
             </Card>
+
             <Card>
-               <CardHeader className="bg-slate-50 py-3"><CardTitle className="text-xs font-bold uppercase text-slate-700">Paradas</CardTitle></CardHeader>
+               <CardHeader className="bg-slate-50 py-3"><CardTitle className="text-xs font-bold uppercase text-slate-700">Adicionar Paradas</CardTitle></CardHeader>
                <CardContent className="pt-6">
-                 {/* ... (Inputs de Paradas iguais) */}
+                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mb-6">
+                    <div className="md:col-span-1">
+                        <label className="text-[10px] font-bold">Horário</label>
+                        <Input type="time" value={novaParada.horario} onChange={e => setNovaParada({...novaParada, horario: e.target.value})} />
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="text-[10px] font-bold">Referência / Ponto</label>
+                        <Input value={novaParada.referencia} onChange={e => setNovaParada({...novaParada, referencia: e.target.value})} placeholder="Ex: Portaria 1" />
+                    </div>
+                    <div className="md:col-span-1">
+                        <label className="text-[10px] font-bold">Bairro</label>
+                        <Input value={novaParada.bairro} onChange={e => setNovaParada({...novaParada, bairro: e.target.value})} placeholder="Bairro" />
+                    </div>
+                    <Button onClick={adicionarParada} className="bg-orange-600"><Plus className="size-4 mr-2" /> Adicionar</Button>
+                 </div>
+
+                 <Table>
+                    <TableHeader className="bg-slate-50"><TableRow><TableHead className="w-16">ORD</TableHead><TableHead>HORA</TableHead><TableHead>REFERÊNCIA</TableHead><TableHead>BAIRRO</TableHead><TableHead className="w-10"></TableHead></TableRow></TableHeader>
+                    <TableBody>
+                        {novoItin.paradas?.map((p, idx) => (
+                            <TableRow key={p.id}><TableCell>{idx + 1}</TableCell><TableCell className="font-bold">{p.horario}</TableCell><TableCell className="uppercase text-xs">{p.referencia}</TableCell><TableCell className="uppercase text-xs">{p.bairro}</TableCell>
+                            <TableCell><Button variant="ghost" size="icon" onClick={() => setNovoItin({...novoItin, paradas: novoItin.paradas?.filter(item => item.id !== p.id)})} className="text-red-500"><Trash2 size={14}/></Button></TableCell></TableRow>
+                        ))}
+                    </TableBody>
+                 </Table>
+
                  <div className="mt-6 flex justify-end">
-                    <Button onClick={salvarItinerario} className="bg-green-600"><Save className="mr-2" /> Salvar</Button>
+                    <Button onClick={salvarItinerario} className="bg-green-600"><Save className="mr-2" /> Salvar Itinerário Completo</Button>
                  </div>
                </CardContent>
             </Card>
           </div>
         ) : (
-          /* LISTAGEM DE CARDS */
           <>
             <div className="relative mb-6">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <Input className="pl-10" placeholder="Buscar itinerário..." value={busca} onChange={(e) => setBusca(e.target.value)} />
+              <Input className="pl-10" placeholder="Buscar por cliente, linha ou garagem..." value={busca} onChange={(e) => setBusca(e.target.value)} />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -204,6 +281,7 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                       <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase">{itin.nomeCliente}</p>
                         <h3 className="font-bold text-sm uppercase leading-tight">{itin.nomeLinha}</h3>
+                        <p className="text-[9px] text-orange-600 font-bold mt-1 uppercase">📍 {itin.garagem}</p>
                       </div>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => handleEditar(itin)} className="size-8 text-blue-600"><Edit2 size={16} /></Button>
@@ -220,9 +298,9 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                     <div className="flex flex-wrap gap-1 mt-3">
                       <Badge variant="secondary" className="text-[9px] uppercase">{itin.turno}</Badge>
                       <Badge variant="outline" className="text-[9px] uppercase">{itin.tipoVeiculo}</Badge>
+                      <Badge variant="outline" className="text-[9px] bg-slate-50">{itin.paradas.length} Paradas</Badge>
                     </div>
 
-                    {/* BOTÕES DE AÇÃO SEPARADOS NO RODAPÉ DO CARD */}
                     <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t">
                       <Button variant="outline" size="sm" onClick={() => setVisualizarItin(itin)} className="text-[9px] font-bold flex flex-col items-center gap-1 h-auto py-2">
                         <Eye size={14} className="text-slate-500" /> VER
@@ -242,19 +320,20 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
         )}
       </div>
 
-      {/* MODAL DE VISUALIZAÇÃO (DIÁLOGO) */}
+      {/* MODAL DE VISUALIZAÇÃO */}
       <Dialog open={!!visualizarItin} onOpenChange={() => setVisualizarItin(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto bg-white">
           <DialogHeader>
             <DialogTitle className="uppercase border-b pb-2">
-                <span className="text-orange-600 block text-xs font-bold">{visualizarItin?.nomeCliente}</span>
+                <span className="text-orange-600 block text-xs font-bold">{visualizarItin?.nomeCliente} | {visualizarItin?.garagem}</span>
                 {visualizarItin?.nomeLinha}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-500">
+            <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-500 bg-slate-50 p-2 rounded">
                 <span>Turno: <span className="text-slate-900">{visualizarItin?.turno}</span></span>
                 <span>Veículo: <span className="text-slate-900">{visualizarItin?.tipoVeiculo}</span></span>
+                <span>Dias: <span className="text-slate-900">{visualizarItin?.diasSemana.join(', ')}</span></span>
             </div>
             <Table>
               <TableHeader><TableRow><TableHead className="h-8 text-[10px]">ORD</TableHead><TableHead className="h-8 text-[10px]">HORA</TableHead><TableHead className="h-8 text-[10px]">REFERÊNCIA</TableHead><TableHead className="h-8 text-[10px]">BAIRRO</TableHead></TableRow></TableHeader>
@@ -263,8 +342,8 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                   <TableRow key={p.id}>
                     <TableCell className="py-2 text-xs">{p.ordem}</TableCell>
                     <TableCell className="py-2 text-xs font-bold text-orange-600">{p.horario}</TableCell>
-                    <TableCell className="py-2 text-[10px] uppercase">{p.referencia}</TableCell>
-                    <TableCell className="py-2 text-[10px] uppercase">{p.bairro}</TableCell>
+                    <TableCell className="py-2 text-[10px] uppercase font-medium">{p.referencia}</TableCell>
+                    <TableCell className="py-2 text-[10px] uppercase text-slate-500">{p.bairro}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
