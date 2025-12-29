@@ -140,6 +140,7 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
                     <TableHead className="text-[9px] font-black text-slate-900 uppercase">Fim</TableHead>
                     <TableHead className="text-[9px] font-black text-orange-700 uppercase bg-orange-50/50">D. Final</TableHead>
                     <TableHead className="text-[9px] font-black text-blue-800 uppercase bg-blue-50/50">Duração</TableHead>
+                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Turno</TableHead>
                     <TableHead className="text-[9px] font-black text-slate-900 uppercase">Carro</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -159,6 +160,7 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
                       <TableCell className="font-bold text-slate-900">{linha.fim}</TableCell>
                       <TableCell className="font-bold text-orange-700 bg-orange-50/20">{linha.deslocamentoFinal || '--:--'}</TableCell>
                       <TableCell className="font-black text-blue-700 bg-blue-50/30">{linha.duracao}</TableCell>
+                      <TableCell className="font-bold text-slate-700 uppercase">{linha.turno}</TableCell>
                       <TableCell className="font-bold text-slate-700">{linha.carro}</TableCell>
                     </TableRow>
                   ))}
