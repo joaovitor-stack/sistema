@@ -2,16 +2,17 @@ import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Building2, Plus, Search, Trash2, X, Save } from 'lucide-react';
+import { Building2, Plus, Search, Trash2, X, Save, Loader2 } from 'lucide-react';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase'; // Importação do Supabase
 
 interface Cliente {
   id: string;
   nome: string;
   cnpj: string;
-  status: 'Ativo' | 'Inativo';
+  status: string; // Adaptado para ler do join com cliente_status
 }
 
 interface GestaoClientesProps {
@@ -23,48 +24,97 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
   const [isCriando, setIsCriando] = useState(false);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [novoCliente, setNovoCliente] = useState({ nome: '', cnpj: '' });
+  const [loading, setLoading] = useState(false);
 
-  // Carregar dados ao iniciar
-  useEffect(() => {
-    const salvos = localStorage.getItem('maxtour_clientes');
-    if (salvos) {
-      setClientes(JSON.parse(salvos));
-    } else {
-      // Exemplo inicial caso esteja vazio
-      const inicial: Cliente[] = [{ id: '1', nome: 'Exemplo de Cliente LTDA', cnpj: '00.000.000/0001-00', status: 'Ativo' }];
-      setClientes(inicial);
-      localStorage.setItem('maxtour_clientes', JSON.stringify(inicial));
+  // Carregar dados do Supabase
+  async function carregarClientes() {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('clientes')
+        .select(`
+          id, 
+          nome, 
+          cnpj, 
+          cliente_status (status)
+        `)
+        .order('nome', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        // Mapeia o resultado para o formato esperado pela interface
+        const formatados: Cliente[] = data.map((item: any) => ({
+          id: item.id,
+          nome: item.nome,
+          cnpj: item.cnpj || '',
+          status: item.cliente_status?.status || 'Ativo'
+        }));
+        setClientes(formatados);
+      }
+    } catch (error: any) {
+      toast.error("Erro ao carregar clientes: " + error.message);
+    } finally {
+      setLoading(false);
     }
+  }
+
+  useEffect(() => {
+    carregarClientes();
   }, []);
 
-  const handleSalvar = (e: React.FormEvent) => {
+  const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoCliente.nome || !novoCliente.cnpj) {
       toast.error("Preencha todos os campos!");
       return;
     }
 
-    const clienteParaAdicionar: Cliente = {
-      id: Math.random().toString(36).substr(2, 9),
-      nome: novoCliente.nome,
-      cnpj: novoCliente.cnpj,
-      status: 'Ativo'
-    };
+    setLoading(true);
+    try {
+      // De acordo com seu SQL, status_id 1 = Ativo
+      const { error } = await supabase
+        .from('clientes')
+        .insert([
+          { 
+            nome: novoCliente.nome, 
+            cnpj: novoCliente.cnpj,
+            status_id: 1 
+          }
+        ]);
 
-    const novaLista = [...clientes, clienteParaAdicionar];
-    setClientes(novaLista);
-    localStorage.setItem('maxtour_clientes', JSON.stringify(novaLista)); // Salva no "Banco"
-    
-    setNovoCliente({ nome: '', cnpj: '' });
-    setIsCriando(false);
-    toast.success("Cliente cadastrado com sucesso!");
+      if (error) throw error;
+
+      toast.success("Cliente cadastrado no banco!");
+      setNovoCliente({ nome: '', cnpj: '' });
+      setIsCriando(false);
+      carregarClientes(); // Recarrega a lista atualizada
+    } catch (error: any) {
+      toast.error("Erro ao salvar: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const removerCliente = (id: string) => {
-    const novaLista = clientes.filter(c => c.id !== id);
-    setClientes(novaLista);
-    localStorage.setItem('maxtour_clientes', JSON.stringify(novaLista));
-    toast.success("Cliente removido.");
+  const removerCliente = async (id: string) => {
+    if (!confirm("Deseja remover este cliente permanentemente?")) return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('clientes')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast.success("Cliente removido do banco.");
+      carregarClientes();
+    } catch (error: any) {
+      toast.error("Erro ao remover: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const clientesFiltrados = clientes.filter(c => 
@@ -97,6 +147,7 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
                     value={novoCliente.nome} 
                     onChange={e => setNovoCliente({...novoCliente, nome: e.target.value})}
                     placeholder="Razão Social"
+                    disabled={loading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -105,10 +156,12 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
                     value={novoCliente.cnpj} 
                     onChange={e => setNovoCliente({...novoCliente, cnpj: e.target.value})}
                     placeholder="00.000.000/0000-00"
+                    disabled={loading}
                   />
                 </div>
-                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white">
-                  <Save className="mr-2 h-4 w-4" /> Salvar Cliente
+                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white" disabled={loading}>
+                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Salvar Cliente
                 </Button>
               </form>
             </CardContent>
@@ -148,27 +201,39 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {clientesFiltrados.map(cliente => (
-                  <TableRow key={cliente.id}>
-                    <TableCell className="font-medium">{cliente.nome}</TableCell>
-                    <TableCell>{cliente.cnpj}</TableCell>
-                    <TableCell>
-                      <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">
-                        {cliente.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-red-600 hover:bg-red-50"
-                        onClick={() => removerCliente(cliente.id)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                {loading && clientes.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-10">
+                      <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+                      <p className="text-sm text-slate-500 mt-2">Carregando clientes...</p>
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  clientesFiltrados.map(cliente => (
+                    <TableRow key={cliente.id}>
+                      <TableCell className="font-medium">{cliente.nome}</TableCell>
+                      <TableCell>{cliente.cnpj}</TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          cliente.status === 'Ativo' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {cliente.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-600 hover:bg-red-50"
+                          onClick={() => removerCliente(cliente.id)}
+                          disabled={loading}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

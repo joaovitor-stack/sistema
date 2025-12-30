@@ -4,53 +4,138 @@ import { Card, CardContent, CardHeader } from './ui/card';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Plus, Trash2, ArrowLeft, BusFront, Search, FileDown } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, BusFront, Search, FileDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
 
 interface ViagemExtra {
   id: string;
-  cliente: string;
-  linha: string;
+  data_viagem: string;
+  garagem_id: string;
+  cliente_id: string;
+  cliente: string; 
+  linha_id: string | null;
+  linha: string;   
   descricao: string;
-  sentido: string;
-  turno: string;
+  motivo_viagem: string; 
+  sentido_id: string;
+  turno_codigo: string;
   inicio: string;
-  tipoVeiculo: string;
+  tipo_veiculo_id: string;
   carro: string;
-  dataViagem: string;
-  garagem: string; // Campo adicionado
 }
 
 export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
-  const [viagens, setViagens] = useState<ViagemExtra[]>([]);
-  const [clientesDisponiveis, setClientesDisponiveis] = useState<any[]>([]);
-  const [todasLinhasCadastradas, setTodasLinhasCadastradas] = useState<any[]>([]);
+  const [viagens, setViagens] = useState<any[]>([]);
+  const [clientes, setClientes] = useState<any[]>([]);
+  const [linhas, setLinhas] = useState<any[]>([]);
+  const [garagens, setGaragens] = useState<any[]>([]);
+  const [turnos, setTurnos] = useState<any[]>([]);
+  const [sentidos, setSentidos] = useState<any[]>([]);
+  const [tiposVeiculo, setTiposVeiculo] = useState<any[]>([]);
+
   const [busca, setBusca] = useState('');
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const [novaViagem, setNovaViagem] = useState<Partial<ViagemExtra>>({
-    cliente: '', 
-    linha: '', 
-    sentido: '', 
-    turno: 'Extra', 
-    dataViagem: '', 
-    inicio: '', 
-    carro: '', 
-    descricao: '', 
-    tipoVeiculo: 'Ônibus',
-    garagem: '' // Inicializado
+    cliente_id: '',
+    linha_id: null,
+    sentido_id: '',
+    turno_codigo: 'Extra',
+    data_viagem: '',
+    inicio: '',
+    carro: '',
+    descricao: '',
+    motivo_viagem: '',
+    tipo_veiculo_id: '',
+    garagem_id: ''
   });
 
   useEffect(() => {
-    const clientes = JSON.parse(localStorage.getItem('maxtour_clientes') || '[]');
-    const linhas = JSON.parse(localStorage.getItem('maxtour_linhas') || '[]');
-    const extrasSalvas = JSON.parse(localStorage.getItem('maxtour_viagens_extras') || '[]');
-    
-    setClientesDisponiveis(clientes);
-    setTodasLinhasCadastradas(linhas);
-    setViagens(extrasSalvas);
+    fetchDados();
   }, []);
+
+  async function fetchDados() {
+    try {
+      setLoading(true);
+      const [v, c, l, g, t, s, tv] = await Promise.all([
+        supabase.from('viagens_extras').select('*').order('data_viagem', { ascending: false }),
+        supabase.from('clientes').select('*').order('nome'),
+        supabase.from('linhas').select('*').order('codigo'),
+        supabase.from('garagens').select('*').order('nome'),
+        supabase.from('turnos').select('*').order('codigo'),
+        supabase.from('sentidos').select('*').order('codigo'),
+        supabase.from('tipos_veiculo').select('*').order('nome'),
+      ]);
+
+      setViagens(v.data || []);
+      setClientes(c.data || []);
+      setLinhas(l.data || []);
+      setGaragens(g.data || []);
+      setTurnos(t.data || []);
+      setSentidos(s.data || []);
+      setTiposVeiculo(tv.data || []);
+    } catch (error: any) {
+      toast.error("Erro ao carregar dados: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleSalvarNovaViagem = async () => {
+    if (!novaViagem.cliente_id || !novaViagem.data_viagem || !novaViagem.inicio || 
+        !novaViagem.garagem_id || !novaViagem.tipo_veiculo_id || !novaViagem.sentido_id || !novaViagem.turno_codigo) {
+      toast.error("Preencha todos os campos obrigatórios.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const cliNome = clientes.find(c => c.id === novaViagem.cliente_id)?.nome || '';
+      const linCod = linhas.find(l => l.id === novaViagem.linha_id)?.codigo || '';
+
+      const { error } = await supabase.from('viagens_extras').insert([{
+        data_viagem: novaViagem.data_viagem,
+        garagem_id: novaViagem.garagem_id,
+        cliente_id: novaViagem.cliente_id,
+        cliente: cliNome,
+        linha_id: novaViagem.linha_id || null,
+        linha: linCod,
+        descricao: novaViagem.descricao || '',
+        motivo_viagem: novaViagem.motivo_viagem || '',
+        sentido_id: novaViagem.sentido_id,
+        turno_codigo: novaViagem.turno_codigo,
+        inicio: novaViagem.inicio,
+        tipo_veiculo_id: novaViagem.tipo_veiculo_id,
+        carro: novaViagem.carro || ''
+      }]);
+
+      if (error) throw error;
+      toast.success("Viagem extra registrada!");
+      setMostrarForm(false);
+      setNovaViagem({ turno_codigo: 'Extra', linha_id: null });
+      fetchDados();
+    } catch (error: any) {
+      toast.error("Erro ao salvar: " + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const excluirViagem = async (id: string) => {
+    if (!confirm("Deseja realmente excluir este registro?")) return;
+    try {
+      const { error } = await supabase.from('viagens_extras').delete().eq('id', id);
+      if (error) throw error;
+      toast.success("Registro removido!");
+      fetchDados();
+    } catch (error: any) {
+      toast.error("Erro ao excluir: " + error.message);
+    }
+  };
 
   const formatarDataSimples = (dataString: string) => {
     if (!dataString) return '';
@@ -58,62 +143,36 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
     return `${dia}/${mes}/${ano}`;
   };
 
-  const handleSalvarNovaViagem = () => {
-    // Validação incluindo o novo campo Garagem
-    if (!novaViagem.cliente || !novaViagem.dataViagem || !novaViagem.inicio || !novaViagem.sentido || !novaViagem.linha || !novaViagem.garagem) {
-      toast.error("Preencha todos os campos, incluindo a Garagem.");
-      return;
-    }
-
-    const registro: ViagemExtra = {
-      ...novaViagem as ViagemExtra,
-      id: Math.random().toString(36).substr(2, 9)
-    };
-
-    const novaLista = [registro, ...viagens];
-    setViagens(novaLista);
-    localStorage.setItem('maxtour_viagens_extras', JSON.stringify(novaLista));
-    
-    // Resetando o formulário
-    setNovaViagem({ 
-      cliente: '', linha: '', sentido: '', turno: 'Extra', 
-      dataViagem: '', inicio: '', carro: '', descricao: '', 
-      tipoVeiculo: 'Ônibus', garagem: '' 
-    });
-    setMostrarForm(false);
-    toast.success("Viagem extra registrada!");
-  };
-
-  const excluirViagem = (id: string) => {
-    const novaLista = viagens.filter(v => v.id !== id);
-    setViagens(novaLista);
-    localStorage.setItem('maxtour_viagens_extras', JSON.stringify(novaLista));
-    toast.success("Registro excluído.");
-  };
-
+  // Exportação ajustada conforme o modelo do arquivo enviado
   const exportarExcel = () => {
     if (viagens.length === 0) return;
 
-    const datasUnicas = Array.from(new Set(viagens.map(v => v.dataViagem))).sort();
+    const datasUnicas = Array.from(new Set(viagens.map(v => v.data_viagem))).sort();
     const datasFormatadas = datasUnicas.map(d => formatarDataSimples(d));
     const consolidado: { [key: string]: any } = {};
 
     viagens.forEach(v => {
-      const nomeCliente = clientesDisponiveis.find(c => c.id === v.cliente)?.nome || v.cliente;
-      const dataCol = formatarDataSimples(v.dataViagem);
+      const nomeCliente = v.cliente;
+      const dataCol = formatarDataSimples(v.data_viagem);
+      const nomeGaragem = garagens.find(g => g.id === v.garagem_id)?.nome || '';
+      const nomeVeiculo = tiposVeiculo.find(tv => tv.id === v.tipo_veiculo_id)?.nome || '';
+      const nomeSentido = sentidos.find(s => s.id === v.sentido_id)?.codigo || '';
       
-      const chave = `${nomeCliente}|${v.linha}|${v.descricao}|${v.turno}|${v.sentido}|${v.tipoVeiculo}|${v.garagem}`;
+      const chave = `${nomeGaragem}|${nomeCliente}|${nomeSentido}|${v.linha}|${v.turno_codigo}|${v.motivo_viagem}|${v.descricao}|${nomeVeiculo}`;
       
       if (!consolidado[chave]) {
+        // Ordem das colunas conforme o seu arquivo CSV
         consolidado[chave] = { 
-          Garagem: v.garagem,
+          Garagem: nomeGaragem,
           Cliente: nomeCliente, 
+          Sentido: nomeSentido,
           Linha: v.linha,
+          Turno: v.turno_codigo,
+          Motivo: v.motivo_viagem || '',
           Descrição: v.descricao,
-          Turno: v.turno, 
-          Sentido: v.sentido, 
-          Veiculo: v.tipoVeiculo 
+          Veiculo: nomeVeiculo 
         };
+        // Inicializa as colunas de data
         datasFormatadas.forEach(df => consolidado[chave][df] = 0);
       }
       consolidado[chave][dataCol] += 1;
@@ -123,7 +182,7 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Relatório Geral");
     XLSX.writeFile(wb, "Escala_Viagens_Extras.xlsx");
-    toast.success("Excel gerado com sucesso!");
+    toast.success("Excel gerado no padrão solicitado!");
   };
 
   return (
@@ -134,7 +193,7 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
             <BusFront className="text-orange-600 size-7" /> Viagens Extras
           </h1>
           <div className="flex gap-2">
-            <Button onClick={exportarExcel} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50 bg-white">
+            <Button onClick={exportarExcel} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50 bg-white shadow-sm">
               <FileDown className="size-4 mr-2" /> Exportar Excel
             </Button>
             <Button variant="outline" onClick={onBack} className="bg-white border-slate-300">
@@ -149,94 +208,106 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
               <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Data</label>
-                  <Input type="date" value={novaViagem.dataViagem} onChange={e => setNovaViagem({...novaViagem, dataViagem: e.target.value})} className="bg-white" />
+                  <Input type="date" value={novaViagem.data_viagem} onChange={e => setNovaViagem({...novaViagem, data_viagem: e.target.value})} className="bg-white" />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Garagem</label>
-                  <Select value={novaViagem.garagem} onValueChange={val => setNovaViagem({...novaViagem, garagem: val})}>
+                  <Select value={novaViagem.garagem_id} onValueChange={val => setNovaViagem({...novaViagem, garagem_id: val})}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      <SelectItem value="Extrema">Extrema</SelectItem>
-                      <SelectItem value="Bragança Paulista">Bragança Paulista</SelectItem>
-                      <SelectItem value="Cambuí - Camanducaia">Cambuí - Camanducaia</SelectItem>
+                      {garagens.map(g => <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Cliente</label>
-                  <Select value={novaViagem.cliente} onValueChange={val => setNovaViagem({...novaViagem, cliente: val, linha: '', descricao: ''})}>
+                  <Select value={novaViagem.cliente_id} onValueChange={val => setNovaViagem({...novaViagem, cliente_id: val, linha_id: null})}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      {clientesDisponiveis.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                      {clientes.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Linha (Código)</label>
+                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Linha (Opcional)</label>
                   <Select 
-                    value={novaViagem.linha} 
+                    value={novaViagem.linha_id || 'none'} 
                     onValueChange={val => {
-                      const linhaObj = todasLinhasCadastradas.find(l => l.codigo === val && l.clienteId === novaViagem.cliente);
-                      setNovaViagem({...novaViagem, linha: val, descricao: linhaObj ? linhaObj.nome : ''});
+                      const id = val === 'none' ? null : val;
+                      const linhaObj = linhas.find(l => l.id === id);
+                      setNovaViagem({...novaViagem, linha_id: id, descricao: linhaObj?.nome || novaViagem.descricao});
                     }}
-                    disabled={!novaViagem.cliente}
+                    disabled={!novaViagem.cliente_id}
                   >
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Cod." /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      {todasLinhasCadastradas.filter(l => l.clienteId === novaViagem.cliente).map(l => (
-                        <SelectItem key={l.id} value={l.codigo}>{l.codigo}</SelectItem>
+                      <SelectItem value="none">Nenhuma / Manual</SelectItem>
+                      {linhas.filter(l => l.cliente_id === novaViagem.cliente_id).map(l => (
+                        <SelectItem key={l.id} value={l.id}>{l.codigo}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1 text-orange-600">Descrição</label>
-                  <Input value={novaViagem.descricao} readOnly className="bg-orange-50/50 border-orange-100 font-semibold" />
+                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Descrição (Manual)</label>
+                  <Input 
+                    value={novaViagem.descricao} 
+                    onChange={e => setNovaViagem({...novaViagem, descricao: e.target.value})} 
+                    className="bg-white" 
+                    placeholder="Descrição da rota..."
+                  />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-6 gap-6 items-end">
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Motivo da Viagem</label>
+                  <Input 
+                    value={novaViagem.motivo_viagem} 
+                    onChange={e => setNovaViagem({...novaViagem, motivo_viagem: e.target.value})} 
+                    placeholder="Ex: Carro quebrou, Solicitação cliente..."
+                    className="bg-white"
+                  />
+                </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Horário</label>
                   <Input type="time" value={novaViagem.inicio} onChange={e => setNovaViagem({...novaViagem, inicio: e.target.value})} className="bg-white" />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Turno</label>
-                  <Select value={novaViagem.turno} onValueChange={val => setNovaViagem({...novaViagem, turno: val})}>
-                    <SelectTrigger className="bg-white"><SelectValue placeholder="Turno" /></SelectTrigger>
+                  <Select value={novaViagem.turno_codigo} onValueChange={val => setNovaViagem({...novaViagem, turno_codigo: val})}>
+                    <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      <SelectItem value="T1">T1</SelectItem>
-                      <SelectItem value="T2">T2</SelectItem>
-                      <SelectItem value="T3">T3</SelectItem>
-                      <SelectItem value="ADM">ADM</SelectItem>
-                      <SelectItem value="Extra">Extra</SelectItem>
+                      {turnos.map(t => <SelectItem key={t.id} value={t.codigo}>{t.codigo}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Veículo</label>
-                  <Select value={novaViagem.tipoVeiculo} onValueChange={val => setNovaViagem({...novaViagem, tipoVeiculo: val})}>
+                  <Select value={novaViagem.tipo_veiculo_id} onValueChange={val => setNovaViagem({...novaViagem, tipo_veiculo_id: val})}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Tipo..." /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      <SelectItem value="Ônibus">Ônibus</SelectItem>
-                      <SelectItem value="Micro">Micro</SelectItem>
-                      <SelectItem value="Van">Van</SelectItem>
+                      {tiposVeiculo.map(tv => <SelectItem key={tv.id} value={tv.id}>{tv.nome}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Sentido</label>
-                  <Select value={novaViagem.sentido} onValueChange={val => setNovaViagem({...novaViagem, sentido: val})}>
+                  <Select value={novaViagem.sentido_id} onValueChange={val => setNovaViagem({...novaViagem, sentido_id: val})}>
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Sentido" /></SelectTrigger>
                     <SelectContent className="bg-white">
-                      <SelectItem value="Entrada">Entrada</SelectItem>
-                      <SelectItem value="Saida">Saída</SelectItem>
+                      {sentidos.map(s => <SelectItem key={s.id} value={s.id}>{s.codigo}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="md:col-span-2 flex items-center gap-3">
-                  <Button onClick={handleSalvarNovaViagem} className="bg-orange-600 hover:bg-orange-700 text-white flex-1 font-bold h-10 shadow-md">Salvar Viagem</Button>
-                  <Button variant="ghost" onClick={() => setMostrarForm(false)} className="h-10 text-slate-500">Cancelar</Button>
+                <div className="flex items-center gap-3">
+                  <Button 
+                    onClick={handleSalvarNovaViagem} 
+                    disabled={saving}
+                    className="bg-orange-600 hover:bg-orange-700 text-white flex-1 font-bold h-10"
+                  >
+                    {saving ? <Loader2 className="animate-spin" /> : "Salvar"}
+                  </Button>
                 </div>
               </div>
             </CardContent>
@@ -247,60 +318,79 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
           <CardHeader className="bg-white border-b py-4 flex flex-row items-center justify-between">
             <div className="relative w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-              <Input placeholder="Filtrar registros ou garagem..." className="pl-10 h-10" value={busca} onChange={e => setBusca(e.target.value)} />
+              <Input placeholder="Filtrar por cliente ou garagem..." className="pl-10 h-10" value={busca} onChange={e => setBusca(e.target.value)} />
             </div>
             {!mostrarForm && (
-              <Button onClick={() => setMostrarForm(true)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 h-10 shadow-md">
+              <Button onClick={() => setMostrarForm(true)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold h-10 px-6">
                 <Plus className="size-4 mr-2" /> Adicionar Viagem Extra
               </Button>
             )}
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
-              <TableHeader className="bg-slate-50">
-                <TableRow className="text-[11px] uppercase font-bold text-slate-600">
-                  <TableHead className="py-4 px-4">Data / Garagem</TableHead>
-                  <TableHead>Cliente / Linha / Descrição</TableHead>
-                  <TableHead className="text-center">Sentido</TableHead>
-                  <TableHead className="text-center">Turno</TableHead>
-                  <TableHead className="text-center">Início</TableHead>
-                  <TableHead className="text-center">Veículo</TableHead>
-                  <TableHead className="w-16"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="bg-white">
-                {viagens.filter(v => 
-                  v.dataViagem.includes(busca) || 
-                  v.cliente.toLowerCase().includes(busca.toLowerCase()) ||
-                  v.garagem?.toLowerCase().includes(busca.toLowerCase())
-                ).map((v) => (
-                  <TableRow key={v.id} className="hover:bg-slate-50 border-b last:border-none">
-                    <TableCell className="font-bold text-slate-700 px-4">
-                      {formatarDataSimples(v.dataViagem)}
-                      <div className="text-[9px] text-orange-600 font-black uppercase tracking-tighter mt-1">{v.garagem}</div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-bold text-blue-700">{clientesDisponiveis.find(c => c.id === v.cliente)?.nome || v.cliente}</span>
-                        <span className="text-[10px] text-slate-600 font-medium">COD: {v.linha}</span>
-                        <span className="text-[11px] text-orange-600 font-bold italic uppercase">{v.descricao}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <span className={`px-2 py-1 rounded text-[10px] font-bold ${v.sentido === 'Entrada' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                        {v.sentido?.toUpperCase()}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-center font-semibold text-slate-600">{v.turno}</TableCell>
-                    <TableCell className="text-center font-bold text-slate-800">{v.inicio}</TableCell>
-                    <TableCell className="text-center text-xs text-slate-500">{v.tipoVeiculo}</TableCell>
-                    <TableCell className="px-4">
-                      <Button variant="ghost" size="sm" onClick={() => excluirViagem(v.id)} className="text-slate-300 hover:text-red-500"><Trash2 className="size-4" /></Button>
-                    </TableCell>
+            {loading ? <div className="p-20 flex justify-center"><Loader2 className="animate-spin text-orange-600" /></div> : (
+              <Table>
+                <TableHeader className="bg-slate-50">
+                  <TableRow className="text-sm uppercase font-black text-slate-700">
+                    <TableHead className="px-6 py-5">Data / Garagem</TableHead>
+                    <TableHead>Cliente / Descrição</TableHead>
+                    <TableHead>Motivo da Viagem</TableHead>
+                    <TableHead className="text-center">Turno / Sentido</TableHead>
+                    <TableHead className="text-center">Início</TableHead>
+                    <TableHead className="text-center">Veículo</TableHead>
+                    <TableHead className="w-20"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody className="bg-white">
+                  {viagens.filter(v => 
+                    v.cliente.toLowerCase().includes(busca.toLowerCase()) || 
+                    garagens.find(g => g.id === v.garagem_id)?.nome.toLowerCase().includes(busca.toLowerCase())
+                  ).map((v) => (
+                    <TableRow key={v.id} className="hover:bg-slate-50 border-b last:border-none transition-colors">
+                      <TableCell className="px-6 py-4">
+                        <span className="text-base font-black text-slate-800">{formatarDataSimples(v.data_viagem)}</span>
+                        <div className="text-[11px] text-orange-600 font-black uppercase tracking-wider mt-1">
+                          {garagens.find(g => g.id === v.garagem_id)?.nome}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex flex-col">
+                          <span className="text-base font-black text-blue-800 uppercase tracking-tight leading-none">{v.cliente}</span>
+                          <span className="text-sm text-slate-600 font-bold mt-1 italic">{v.descricao}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <span className="text-sm font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded border border-slate-200">
+                          {v.motivo_viagem || "Não informado"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center py-4">
+                        <div className="flex flex-col items-center">
+                          <span className="text-sm font-black text-slate-800">{v.turno_codigo}</span>
+                          <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 rounded-full border border-blue-100 uppercase">
+                             {sentidos.find(s => s.id === v.sentido_id)?.codigo}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center py-4">
+                        <span className="text-lg font-black text-slate-900 bg-yellow-50 px-3 py-1 rounded-md border border-yellow-200">
+                          {v.inicio?.slice(0,5)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center py-4">
+                        <span className="text-xs font-black text-slate-500 uppercase">
+                          {tiposVeiculo.find(tv => tv.id === v.tipo_veiculo_id)?.nome}
+                        </span>
+                      </TableCell>
+                      <TableCell className="px-6 py-4 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => excluirViagem(v.id)} className="text-slate-300 hover:text-red-600 hover:bg-red-50 transition-all">
+                          <Trash2 size={20} />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>

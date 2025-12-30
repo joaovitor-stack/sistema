@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
@@ -6,175 +7,180 @@ import {
   Printer, 
   Calendar, 
   FileSpreadsheet, 
-  FileDown 
+  User,
+  Loader2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
 
 interface VisualizarEscalaProps {
-  dados: any;
+  dados: any; 
   onBack: () => void;
 }
 
 export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
-  
-  const dataFormatadaArquivo = dados.dataCriacao.replace(/\//g, '-');
+  const [loading, setLoading] = useState(true);
+  const [escalaCompleta, setEscalaCompleta] = useState<any>(null);
 
-  // 1. EXPORTAR EXCEL
+  useEffect(() => {
+    async function carregarEscalaDoBanco() {
+      // CORREÇÃO DO ERRO 400: Se o ID não existir, interrompe imediatamente
+      if (!dados?.id) {
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('escalas')
+          .select(`
+            *,
+            garagens(nome),
+            perfis_usuarios(nome),
+            escala_viagens(*)
+          `)
+          .eq('id', dados.id)
+          .single();
+
+        if (error) throw error;
+        setEscalaCompleta(data);
+      } catch (error) {
+        console.error("Erro ao carregar escala:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    carregarEscalaDoBanco();
+  }, [dados?.id]);
+
   const exportToExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(dados.linhas.map((l: any) => ({
-      Motorista: l.nomeMotorista,
-      RE: l.numeroRegistro,
-      Cliente: l.cliente,
-      Linha: l.linha,
-      Descricao: l.descricao,
-      "Desloc. Inicial": l.deslocamentoInicial,
-      "Início Viagem": l.inicio,
-      "Fim Viagem": l.fim,
-      "Desloc. Final": l.deslocamentoFinal,
-      Duracao: l.duracao,
-      Sentido: l.sentido,
-      Turno: l.turno,
-      Carro: l.carro
+    if (!escalaCompleta?.escala_viagens) return;
+    const worksheet = XLSX.utils.json_to_sheet(escalaCompleta.escala_viagens.map((v: any) => ({
+      Motorista: v.motorista_nome_snapshot,
+      RE: v.motorista_re_snapshot,
+      Cliente: v.cliente,
+      Linha: v.linha,
+      Duração: v.duracao_hhmm || v.duracao
     })));
-    
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Escala RH");
-    XLSX.writeFile(workbook, `Escala_RH_${dataFormatadaArquivo}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Escala");
+    XLSX.writeFile(workbook, `Escala_${escalaCompleta.data_escala}.xlsx`);
   };
 
-  // 2. GERAR PDF (Via função de impressão com título limpo)
-  const handleExportPDF = () => {
-    const originalTitle = document.title;
-    document.title = `ESCALA_MAXTOUR_RH_${dataFormatadaArquivo}`;
-    window.print();
-    document.title = originalTitle;
-  };
+  // CORREÇÃO DO TYPEERROR: 
+  // Enquanto estiver carregando ou se escalaCompleta for nulo, 
+  // o React NÃO PODE prosseguir para o return principal.
+  if (loading || !escalaCompleta) {
+    return (
+      <div className="flex h-64 w-full items-center justify-center bg-white rounded-lg border border-slate-200">
+        <Loader2 className="animate-spin size-8 text-blue-600 mr-3" />
+        <p className="text-slate-500 font-medium">Carregando dados...</p>
+      </div>
+    );
+  }
 
-  // 3. IMPRIMIR DIRETO
-  const handlePrint = () => {
-    window.print();
-  };
+  // A partir daqui, o TypeScript e o React sabem que escalaCompleta NÃO é nula.
+  const viagens = escalaCompleta.escala_viagens || [];
+  const dataFormatada = escalaCompleta.data_escala?.split('-').reverse().join('/') || '--/--/----';
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 print:p-0 print:bg-white">
-      {/* ESTILO CSS PARA FORÇAR MODO RETRATO E CORES NA IMPRESSÃO */}
+    <div className="min-h-screen bg-slate-50 p-4 print:p-0 print:bg-white">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          @page { 
-            size: portrait; 
-            margin: 10mm; 
-          }
-          body { 
-            -webkit-print-color-adjust: exact !important; 
-            print-color-adjust: exact !important;
-          }
-          .print-no-break {
-            break-inside: avoid;
-          }
+          @page { size: portrait; margin: 10mm; }
+          .no-print { display: none !important; }
         }
       `}} />
 
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-4">
         
-        {/* BARRA DE AÇÕES (BOTÕES SEPARADOS) */}
-        <div className="flex items-center justify-between print:hidden bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <div className="no-print flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-slate-200">
           <Button variant="ghost" onClick={onBack} size="sm">
             <ArrowLeft className="size-4 mr-2" /> Voltar
           </Button>
           
-          <div className="flex gap-3">
-            <Button 
-              variant="outline" 
-              onClick={exportToExcel} 
-              className="border-green-600 text-green-700 hover:bg-green-50"
-            >
-              <FileSpreadsheet className="size-4 mr-2" /> Exporta Arquivo Excel
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={exportToExcel} className="text-green-700 border-green-200 hover:bg-green-50">
+              <FileSpreadsheet className="size-4 mr-2" /> Exportar Excel
             </Button>
-
-            <Button 
-              variant="outline" 
-              onClick={handleExportPDF} 
-              className="border-red-600 text-red-700 hover:bg-red-50"
-            >
-              <FileDown className="size-4 mr-2" /> Gerar PDF
-            </Button>
-
-            <Button 
-              onClick={handlePrint} 
-              className="bg-slate-800 text-white hover:bg-slate-900"
-            >
-              <Printer className="size-4 mr-2" /> Imprimir
+            <Button size="sm" onClick={() => window.print()} className="bg-slate-900 text-white hover:bg-black">
+              <Printer className="size-4 mr-2" /> Imprimir / PDF
             </Button>
           </div>
         </div>
 
-        {/* DOCUMENTO DA ESCALA */}
-        <Card className="rounded-none border-2 border-slate-900 shadow-none bg-white">
+        <Card className="rounded-none shadow-none border-2 border-slate-900 bg-white">
           <CardContent className="p-8">
             
-            {/* CABEÇALHO */}
             <div className="flex justify-between items-start border-b-4 border-slate-900 pb-6 mb-6">
               <div>
-                <h2 className="text-4xl font-black uppercase text-slate-900">Maxtour</h2>
-                <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">Fretamento & TURISMO</p>
-              </div>
-              
-              <div className="text-right">
-                <div className="bg-slate-900 text-white px-3 py-1 inline-flex items-center gap-2 font-bold text-sm mb-1">
-                  <Calendar className="size-4" /> {dados.dataCriacao}
+                <h1 className="text-4xl font-black text-slate-900 tracking-tighter">MAXTOUR</h1>
+                <p className="text-[10px] font-bold tracking-[0.3em] text-slate-400 uppercase">Fretamento & Turismo</p>
+                <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-slate-600 uppercase">
+                  <User className="size-3 text-slate-400" /> 
+                  {/* CORREÇÃO: Usando Optional Chaining para perfis_usuarios */}
+                  Elaborado por: {escalaCompleta.perfis_usuarios?.nome || 'SISTEMA'}
                 </div>
-                <h3 className="text-xl font-black text-blue-700 uppercase">{dados.diaSemana}</h3>
-                <p className="text-xs font-bold text-slate-600">{dados.garagem}</p>
+              </div>
+
+              <div className="text-right">
+                <div className="bg-slate-900 text-white px-4 py-1.5 inline-flex items-center gap-2 text-sm font-bold rounded-sm mb-2">
+                  <Calendar className="size-4" /> {dataFormatada}
+                </div>
+                <h2 className="text-2xl font-black text-blue-700 uppercase">
+                  {escalaCompleta.dia_semana_texto || '---'}
+                </h2>
+                <p className="text-xs font-bold text-slate-500 uppercase">
+                  Unidade: {escalaCompleta.garagens?.nome || 'Extrema'}
+                </p>
               </div>
             </div>
 
-            {/* TABELA DE DADOS */}
             <div className="border border-slate-300">
               <Table>
                 <TableHeader className="bg-slate-100 border-b-2 border-slate-900">
                   <TableRow>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Motorista (Chapa)</TableHead>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Cliente/Linha</TableHead>
-                    <TableHead className="text-[9px] font-black text-orange-700 uppercase bg-orange-50/50">D. Inicial</TableHead>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Início</TableHead>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Fim</TableHead>
-                    <TableHead className="text-[9px] font-black text-orange-700 uppercase bg-orange-50/50">D. Final</TableHead>
-                    <TableHead className="text-[9px] font-black text-blue-800 uppercase bg-blue-50/50">Duração</TableHead>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Turno</TableHead>
-                    <TableHead className="text-[9px] font-black text-slate-900 uppercase">Carro</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 py-3 uppercase">Motorista (RE)</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 uppercase">Cliente / Linha</TableHead>
+                    <TableHead className="text-[10px] font-black text-orange-600 text-center uppercase">D. Inicial</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 text-center uppercase">Início</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 text-center uppercase">Fim</TableHead>
+                    <TableHead className="text-[10px] font-black text-orange-600 text-center uppercase">D. Final</TableHead>
+                    <TableHead className="text-[10px] font-black text-blue-800 bg-blue-50 text-center uppercase">Duração</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 text-center uppercase">Turno</TableHead>
+                    <TableHead className="text-[10px] font-black text-slate-900 text-center uppercase">Carro</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dados.linhas?.map((linha: any) => (
-                    <TableRow key={linha.id} className="border-b border-slate-200 text-[10px]">
-                      <TableCell className="py-2 font-bold uppercase">
-                        {linha.nomeMotorista} 
-                        <span className="block text-[8px] text-slate-400 font-normal">RE: {linha.numeroRegistro}</span>
+                  {viagens.map((v: any, idx: number) => (
+                    <TableRow key={v.id || idx} className="border-b border-slate-200">
+                      <TableCell className="py-3">
+                        <div className="font-bold text-[11px] uppercase leading-none">{v.motorista_nome_snapshot}</div>
+                        <div className="text-[8px] text-slate-400 mt-1">RE: {v.motorista_re_snapshot}</div>
                       </TableCell>
-                      <TableCell className="py-2">
-                        <span className="font-bold text-blue-900 block">{linha.cliente}</span>
-                        <span className="text-[9px]">{linha.linha}</span>
+                      <TableCell>
+                        <div className="font-bold text-[10px] text-blue-900 uppercase">{v.cliente}</div>
+                        <div className="text-[9px] text-slate-500 italic leading-tight">{v.linha}</div>
                       </TableCell>
-                      <TableCell className="font-bold text-orange-700 bg-orange-50/20">{linha.deslocamentoInicial || '--:--'}</TableCell>
-                      <TableCell className="font-bold text-slate-900">{linha.inicio}</TableCell>
-                      <TableCell className="font-bold text-slate-900">{linha.fim}</TableCell>
-                      <TableCell className="font-bold text-orange-700 bg-orange-50/20">{linha.deslocamentoFinal || '--:--'}</TableCell>
-                      <TableCell className="font-black text-blue-700 bg-blue-50/30">{linha.duracao}</TableCell>
-                      <TableCell className="font-bold text-slate-700 uppercase">{linha.turno}</TableCell>
-                      <TableCell className="font-bold text-slate-700">{linha.carro}</TableCell>
+                      <TableCell className="text-center font-bold text-orange-600 text-[10px]">{v.deslocamento_inicial?.slice(0,5) || '--:--'}</TableCell>
+                      <TableCell className="text-center font-bold text-slate-900 text-[10px]">{v.inicio?.slice(0,5) || '--:--'}</TableCell>
+                      <TableCell className="text-center font-bold text-slate-900 text-[10px]">{v.fim?.slice(0,5) || '--:--'}</TableCell>
+                      <TableCell className="text-center font-bold text-orange-600 text-[10px]">{v.deslocamento_final?.slice(0,5) || '--:--'}</TableCell>
+                      <TableCell className="text-center font-black text-blue-700 bg-blue-50/50 text-[10px]">{v.duracao_hhmm || v.duracao || '--:--'}</TableCell>
+                      <TableCell className="text-center font-bold text-slate-600 text-[10px] uppercase">{v.turno_codigo}</TableCell>
+                      <TableCell className="text-center font-bold text-slate-900 text-[10px]">{v.carro || '---'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
 
-            {/* RODAPÉ */}
-            <div className="mt-12 grid grid-cols-2 gap-20">
-              <div className="border-t border-slate-400 pt-2">
-                <p className="text-[8px] uppercase font-bold text-slate-500 text-center">Assinatura do Gestor</p>
+            <div className="mt-16 grid grid-cols-2 gap-20">
+              <div className="border-t-2 border-slate-900 pt-2 text-center">
+                <p className="text-[10px] font-black uppercase text-slate-900 tracking-widest">Assinatura do Gestor</p>
               </div>
-              <div className="border-t border-slate-400 pt-2">
-                <p className="text-[8px] uppercase font-bold text-slate-500 text-center">Conferência RH / Tráfego</p>
+              <div className="border-t-2 border-slate-900 pt-2 text-center">
+                <p className="text-[10px] font-black uppercase text-slate-900 tracking-widest">Conferência RH / Tráfego</p>
               </div>
             </div>
           </CardContent>

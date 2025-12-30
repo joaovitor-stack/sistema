@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Route, Plus, Save, X, Trash2 } from 'lucide-react';
+import { Route, Plus, Save, X, Trash2, Loader2 } from 'lucide-react';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase'; // Importação do Supabase
 
 interface LinhaCadastrada {
   id: string;
@@ -18,49 +19,110 @@ interface LinhaCadastrada {
 
 export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
   const [isCriando, setIsCriando] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [linhas, setLinhas] = useState<LinhaCadastrada[]>([]);
   const [clientesCadastrados, setClientesCadastrados] = useState<{id: string, nome: string}[]>([]);
   const [novaLinha, setNovaLinha] = useState({ codigo: '', nome: '', clienteId: '' });
 
-  // Carregar Clientes e Linhas do localStorage
+  // Carregar Dados do Supabase
+  async function carregarDados() {
+    setLoading(true);
+    try {
+      // 1. Carregar Clientes para o Select
+      const { data: clientesData } = await supabase
+        .from('clientes')
+        .select('id, nome')
+        .order('nome');
+      
+      if (clientesData) setClientesCadastrados(clientesData);
+
+      // 2. Carregar Linhas com Join em Clientes
+      const { data: linhasData, error } = await supabase
+        .from('linhas')
+        .select(`
+          id, 
+          codigo, 
+          nome, 
+          cliente_id,
+          clientes (nome)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (linhasData) {
+        const formatadas: LinhaCadastrada[] = linhasData.map((item: any) => ({
+          id: item.id,
+          codigo: item.codigo,
+          nome: item.nome,
+          clienteId: item.cliente_id,
+          clienteNome: item.clientes?.nome || 'Cliente não encontrado'
+        }));
+        setLinhas(formatadas);
+      }
+    } catch (error: any) {
+      toast.error("Erro ao carregar dados: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    const clientesSalvos = JSON.parse(localStorage.getItem('maxtour_clientes') || '[]');
-    const linhasSalvas = JSON.parse(localStorage.getItem('maxtour_linhas') || '[]');
-    setClientesCadastrados(clientesSalvos);
-    setLinhas(linhasSalvas);
+    carregarDados();
   }, []);
 
-  const handleSalvar = (e: React.FormEvent) => {
+  const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cliente = clientesCadastrados.find(c => c.id === novaLinha.clienteId);
     
-    if (!novaLinha.codigo || !novaLinha.clienteId) {
-      toast.error("Selecione o cliente e o código da linha!");
+    if (!novaLinha.codigo || !novaLinha.clienteId || !novaLinha.nome) {
+      toast.error("Preencha todos os campos!");
       return;
     }
 
-    const item: LinhaCadastrada = {
-      id: Math.random().toString(36).substr(2, 9),
-      codigo: novaLinha.codigo,
-      nome: novaLinha.nome,
-      clienteId: novaLinha.clienteId,
-      clienteNome: cliente?.nome || 'Cliente não encontrado'
-    };
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('linhas')
+        .insert([
+          { 
+            codigo: novaLinha.codigo, 
+            nome: novaLinha.nome, 
+            cliente_id: novaLinha.clienteId 
+          }
+        ]);
 
-    const novaLista = [...linhas, item];
-    setLinhas(novaLista);
-    localStorage.setItem('maxtour_linhas', JSON.stringify(novaLista)); // Salva para uso na Escala
-    
-    setIsCriando(false);
-    setNovaLinha({ codigo: '', nome: '', clienteId: '' });
-    toast.success("Linha vinculada com sucesso!");
+      if (error) throw error;
+
+      toast.success("Linha cadastrada com sucesso!");
+      setIsCriando(false);
+      setNovaLinha({ codigo: '', nome: '', clienteId: '' });
+      carregarDados();
+    } catch (error: any) {
+      toast.error("Erro ao salvar: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const removerLinha = (id: string) => {
-    const novaLista = linhas.filter(l => l.id !== id);
-    setLinhas(novaLista);
-    localStorage.setItem('maxtour_linhas', JSON.stringify(novaLista));
-    toast.success("Linha removida.");
+  const removerLinha = async (id: string) => {
+    if (!confirm("Deseja remover esta linha?")) return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('linhas')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast.success("Linha removida.");
+      carregarDados();
+    } catch (error: any) {
+      toast.error("Erro ao remover: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -78,13 +140,19 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
           <Card className="mb-6 border-green-200 bg-green-50/50">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Nova Linha</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setIsCriando(false)}><X className="size-4" /></Button>
+              <Button variant="ghost" size="sm" onClick={() => setIsCriando(false)} disabled={loading}>
+                <X className="size-4" />
+              </Button>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSalvar} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                 <div className="space-y-2">
                   <Label>Selecione o Cliente</Label>
-                  <Select onValueChange={(val) => setNovaLinha({...novaLinha, clienteId: val})}>
+                  <Select 
+                    value={novaLinha.clienteId}
+                    onValueChange={(val) => setNovaLinha({...novaLinha, clienteId: val})}
+                    disabled={loading}
+                  >
                     <SelectTrigger><SelectValue placeholder="Escolha um cliente" /></SelectTrigger>
                     <SelectContent>
                       {clientesCadastrados.map(c => (
@@ -95,14 +163,25 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                 </div>
                 <div className="space-y-2">
                   <Label>Cód. Linha</Label>
-                  <Input value={novaLinha.codigo} onChange={e => setNovaLinha({...novaLinha, codigo: e.target.value})} placeholder="Ex: ROTA-01" />
+                  <Input 
+                    value={novaLinha.codigo} 
+                    onChange={e => setNovaLinha({...novaLinha, codigo: e.target.value})} 
+                    placeholder="Ex: ROTA-01" 
+                    disabled={loading}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Descrição da Rota</Label>
-                  <Input value={novaLinha.nome} onChange={e => setNovaLinha({...novaLinha, nome: e.target.value})} placeholder="Ex: Centro x Industrial" />
+                  <Input 
+                    value={novaLinha.nome} 
+                    onChange={e => setNovaLinha({...novaLinha, nome: e.target.value})} 
+                    placeholder="Ex: Centro x Industrial" 
+                    disabled={loading}
+                  />
                 </div>
-                <Button type="submit" className="bg-green-600 text-white hover:bg-green-700">
-                  <Save className="mr-2 h-4 w-4" /> Salvar Linha
+                <Button type="submit" className="bg-green-600 text-white hover:bg-green-700" disabled={loading}>
+                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Salvar Linha
                 </Button>
               </form>
             </CardContent>
@@ -112,9 +191,11 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Relação Linha x Cliente</CardTitle>
-            <Button onClick={() => setIsCriando(true)} className="bg-green-600 text-white hover:bg-green-700">
-              <Plus className="size-4 mr-2" /> Vincular Linha
-            </Button>
+            {!isCriando && (
+              <Button onClick={() => setIsCriando(true)} className="bg-green-600 text-white hover:bg-green-700">
+                <Plus className="size-4 mr-2" /> Vincular Linha
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <Table>
@@ -127,18 +208,31 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {linhas.map(l => (
-                  <TableRow key={l.id}>
-                    <TableCell className="font-medium text-blue-700">{l.clienteNome}</TableCell>
-                    <TableCell className="font-bold">{l.codigo}</TableCell>
-                    <TableCell>{l.nome}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => removerLinha(l.id)}>
-                        <Trash2 className="size-4 text-red-500" />
-                      </Button>
+                {loading && linhas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-10">
+                      <Loader2 className="h-8 w-8 animate-spin mx-auto text-green-600" />
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  linhas.map(l => (
+                    <TableRow key={l.id}>
+                      <TableCell className="font-medium text-blue-700">{l.clienteNome}</TableCell>
+                      <TableCell className="font-bold">{l.codigo}</TableCell>
+                      <TableCell>{l.nome}</TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => removerLinha(l.id)}
+                          disabled={loading}
+                        >
+                          <Trash2 className="size-4 text-red-500" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

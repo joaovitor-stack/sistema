@@ -3,50 +3,84 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './com
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { Button } from './components/ui/button';
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, Loader2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { TelaDeLancamento } from './components/TelaDeLancamento';
-import { UserRole, Usuario } from './types'; 
-
-const usuariosDemo: Record<string, { password: string; name: string; role: UserRole }> = {
-  'admin@maxtour.com': { password: 'admin123', name: 'Admin Sistema', role: 'admin' },
-  'escalante@maxtour.com': { password: 'escala123', name: 'João Escalante', role: 'escalante' },
-  'rh@maxtour.com': { password: 'rh123', name: 'Maria RH', role: 'recursos-humanos' },
-  'plantao@maxtour.com': { password: 'plantao123', name: 'Plantão Maxtour', role: 'plantao' },
-  'extra@maxtour.com': { password: 'extra123', name: 'Carlos Extra', role: 'escalante_extra' }
-};
+import { UserRole } from './types'; 
+import { supabase } from './lib/supabase';
 
 export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  
+  // ESTADOS DO USUÁRIO
+  const [userId, setUserId] = useState(''); // <--- ADICIONADO: Armazena o UUID do banco
   const [userName, setUserName] = useState('');
   const [userRole, setUserRole] = useState<UserRole>('recursos-humanos');
+  
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
 
-    const usuariosCadastrados: Usuario[] = JSON.parse(localStorage.getItem('maxtour_usuarios') || '[]');
-    const usuarioDinamico = usuariosCadastrados.find(u => u.email.toLowerCase() === email.toLowerCase());
+    try {
+      // 1. Autenticação no Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (usuarioDinamico) {
-      setUserName(usuarioDinamico.nome);
-      setUserRole(usuarioDinamico.role);
+      if (authError) {
+        toast.error('Email ou senha inválidos');
+        setLoading(false);
+        return;
+      }
+
+      // 2. Busca o Perfil do Usuário com o Cargo
+      const { data: perfil, error: perfilError } = await supabase
+        .from('perfis_usuarios')
+        .select(`
+          id,
+          nome,
+          roles_usuario (
+            codigo
+          )
+        `)
+        .eq('id', authData.user.id)
+        .single();
+
+      if (perfilError || !perfil) {
+        toast.error('Perfil de usuário não encontrado no banco.');
+        setLoading(false);
+        return;
+      }
+
+      // 3. Define os dados da sessão incluindo o ID do banco
+      const cargoDoBanco = (perfil.roles_usuario as any).codigo as UserRole;
+      
+      setUserId(perfil.id); // <--- ADICIONADO: Define o ID para ser usado na Tela de Lançamento
+      setUserName(perfil.nome);
+      setUserRole(cargoDoBanco);
       setIsLoggedIn(true);
-      toast.success(`Bem-vindo, ${usuarioDinamico.nome}!`);
-      return;
+      
+      toast.success(`Bem-vindo, ${perfil.nome}!`);
+    } catch (error) {
+      toast.error('Ocorreu um erro inesperado ao fazer login.');
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const user = usuariosDemo[email];
-    if (user && user.password === password) {
-      setUserName(user.name);
-      setUserRole(user.role);
-      setIsLoggedIn(true);
-      toast.success(`Bem-vindo, ${user.name}!`);
-    } else {
-      toast.error('Email ou senha inválidos');
-    }
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsLoggedIn(false);
+    setUserId(''); // Limpa o ID no logout
+    setEmail('');
+    setPassword('');
   };
 
   if (isLoggedIn) {
@@ -54,9 +88,10 @@ export default function App() {
       <>
         <Toaster richColors position="top-right" />
         <TelaDeLancamento 
+          userId={userId}    // <--- PASSANDO O ID PARA O COMPONENTE
           userName={userName} 
           userRole={userRole} 
-          onLogout={() => setIsLoggedIn(false)} 
+          onLogout={handleLogout} 
         />
       </>
     );
@@ -68,7 +103,7 @@ export default function App() {
       <Card className="w-full max-w-md bg-white shadow-lg border-green-100">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-slate-800">Escalas Max Tour</CardTitle>
-          <CardDescription>Faça login para acessar o sistema</CardDescription>
+          <CardDescription>Faça login com sua conta</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -80,9 +115,10 @@ export default function App() {
                   type="email" 
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
-                  placeholder="admin@maxtour.com" 
+                  placeholder="E-mail" 
                   className="pl-10 bg-white border-slate-200"
                   required 
+                  disabled={loading}
                 />
               </div>
             </div>
@@ -96,6 +132,7 @@ export default function App() {
                   onChange={(e) => setPassword(e.target.value)} 
                   className="pl-10 pr-10 bg-white border-slate-200"
                   required 
+                  disabled={loading}
                 />
                 <button 
                   type="button" 
@@ -106,8 +143,19 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 font-bold transition-colors">
-              Entrar
+            <Button 
+              type="submit" 
+              className="w-full bg-blue-600 hover:bg-blue-700 font-bold transition-colors"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Autenticando...
+                </>
+              ) : (
+                'Entrar'
+              )}
             </Button>
           </form>
         </CardContent>
