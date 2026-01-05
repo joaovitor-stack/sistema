@@ -3,7 +3,21 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Input } from './ui/input';
-import { Trash2, Plus, Search, Settings, LogOut, Eye, Edit, Copy, Clock, Loader2, User } from 'lucide-react';
+import { 
+  Trash2, 
+  Plus, 
+  Search, 
+  Settings, 
+  LogOut, 
+  Eye, 
+  Edit, 
+  Copy, 
+  Clock, 
+  Loader2, 
+  User, 
+  Archive, 
+  CalendarCheck 
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { CriarNovaEscala } from './CriarNovaEscala';
@@ -14,7 +28,7 @@ import { UserRole } from '../types';
 import { supabase } from '../lib/supabase';
 
 interface TelaDeLancamentoProps {
-  userId: string;     // Essencial para o 'criado_por'
+  userId: string;
   userName: string;
   userRole: UserRole;
   onLogout: () => void;
@@ -22,6 +36,7 @@ interface TelaDeLancamentoProps {
 
 export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaDeLancamentoProps) {
   const [view, setView] = useState<'lista' | 'nova' | 'admin' | 'visualizar' | 'editar'>('lista');
+  const [abaAtiva, setAbaAtiva] = useState<'disponiveis' | 'arquivadas'>('disponiveis');
   const [busca, setBusca] = useState('');
   const [escalas, setEscalas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +44,6 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
   
   const podeEditar = userRole === 'admin' || userRole === 'escalante';
 
-  // BUSCA DADOS DO SUPABASE COM JOIN NO CRIADOR E GARAGEM
   async function carregarEscalas() {
     setLoading(true);
     try {
@@ -47,75 +61,81 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
       setEscalas(data || []);
     } catch (error) {
       console.error(error);
-      toast.error("Erro ao carregar escalas do banco de dados.");
+      toast.error("Erro ao carregar escalas.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (view === 'lista') {
-      carregarEscalas();
-    }
+    if (view === 'lista') carregarEscalas();
   }, [view]);
 
   const handleExcluir = async (id: string) => {
-    if (confirm("Deseja realmente excluir esta escala e todas as suas viagens?")) {
+    if (confirm("Deseja realmente excluir esta escala?")) {
       try {
         const { error } = await supabase.from('escalas').delete().eq('id', id);
         if (error) throw error;
-        
         setEscalas(prev => prev.filter(e => e.id !== id));
-        toast.success("Escala removida com sucesso!");
-      } catch (error) {
-        toast.error("Erro ao excluir registro.");
-      }
+        toast.success("Removida!");
+      } catch (error) { toast.error("Erro ao excluir."); }
     }
   };
 
   const handleDuplicar = async (escala: any) => {
     try {
-      // 1. Clona o cabeçalho registrando quem está duplicando
       const { data: novaEscala, error: errE } = await supabase
         .from('escalas')
         .insert([{
           data_escala: escala.data_escala,
           garagem_id: escala.garagem_id,
           dia_semana_texto: escala.dia_semana_texto,
-          criado_por: userId // Vincula ao usuário logado atual
+          criado_por: userId,
+          hora_criacao: new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' })
         }])
-        .select()
-        .single();
+        .select().single();
 
       if (errE) throw errE;
 
-      // 2. Busca e clona as viagens vinculadas
       const { data: viagens } = await supabase.from('escala_viagens').select('*').eq('escala_id', escala.id);
-      
       if (viagens && viagens.length > 0) {
-        const novasViagens = viagens.map(({ id, created_at, ...v }) => ({
-          ...v,
-          escala_id: novaEscala.id
-        }));
+        const novasViagens = viagens.map(({ id, created_at, ...v }) => ({ ...v, escala_id: novaEscala.id }));
         await supabase.from('escala_viagens').insert(novasViagens);
       }
-
       toast.success("Escala duplicada com sucesso!");
       carregarEscalas();
-    } catch (error) {
-      toast.error("Erro ao duplicar escala.");
+    } catch (error) { 
+      console.error(error);
+      toast.error("Erro ao duplicar."); 
     }
   };
 
-  const escalasFiltradas = escalas.filter(e => 
-    e.data_escala?.includes(busca) || 
-    e.dia_semana_texto?.toLowerCase().includes(busca.toLowerCase()) ||
-    e.garagens?.nome?.toLowerCase().includes(busca.toLowerCase()) ||
-    e.perfis_usuarios?.nome?.toLowerCase().includes(busca.toLowerCase())
-  );
+  const filtrarEscalas = (lista: any[]) => {
+    const hoje = new Date();
+    const limite15Dias = new Date();
+    limite15Dias.setDate(hoje.getDate() - 15);
+
+    return lista.filter(e => {
+      const dataEscala = new Date(e.data_escala);
+      const ehRecente = dataEscala >= limite15Dias;
+
+      if (abaAtiva === 'disponiveis' && !ehRecente) return false;
+      if (abaAtiva === 'arquivadas' && ehRecente) return false;
+
+      const termo = busca.toLowerCase();
+      return (
+        e.data_escala?.includes(busca) || 
+        e.dia_semana_texto?.toLowerCase().includes(termo) ||
+        e.garagens?.nome?.toLowerCase().includes(termo) ||
+        e.perfis_usuarios?.nome?.toLowerCase().includes(termo)
+      );
+    });
+  };
+
+  const escalasExibidas = filtrarEscalas(escalas);
 
   if (view === 'admin') return <AdminMenu onVoltar={() => setView('lista')} userRole={userRole} />;
-  if (view === 'nova') return <CriarNovaEscala onSave={() => setView('lista')} onBack={() => setView('lista')} />;
+  if (view === 'nova') return <CriarNovaEscala userId={userId} onSave={() => setView('lista')} onBack={() => setView('lista')} />;
   if (view === 'visualizar' && escalaSelecionada) return <VisualizarEscala dados={escalaSelecionada} onBack={() => { setEscalaSelecionada(null); setView('lista'); }} />;
   if (view === 'editar' && escalaSelecionada) return <EditarEscala escalaOriginal={escalaSelecionada} onBack={() => { setEscalaSelecionada(null); setView('lista'); }} />;
 
@@ -124,39 +144,54 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
       <div className="max-w-7xl mx-auto">
         <header className="flex justify-between items-center mb-8 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center gap-4">
-            <div className="bg-blue-600 p-3 rounded-lg text-white">
-              <User className="size-6" />
-            </div>
+            <div className="bg-blue-600 p-3 rounded-lg text-white"><User className="size-6" /></div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 leading-tight">Gestão Max Tour</h1>
-              <p className="text-sm text-slate-500 font-medium">Operador: <span className="text-blue-600">{userName}</span></p>
+              <h1 className="text-2xl font-bold text-slate-900">Gestão Max Tour</h1>
+              <p className="text-sm text-slate-500">Operador: <span className="text-blue-600 font-bold">{userName}</span></p>
             </div>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setView('admin')} className="border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Settings className="size-4 mr-2" /> Painel Admin
-            </Button>
-            <Button variant="ghost" onClick={onLogout} className="text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors">
-              <LogOut className="size-4 mr-2" /> Sair
-            </Button>
+            <Button variant="outline" onClick={() => setView('admin')}><Settings className="size-4 mr-2" /> Painel</Button>
+            <Button variant="ghost" onClick={onLogout} className="text-red-500 hover:bg-red-50"><LogOut className="size-4 mr-2" /> Sair</Button>
           </div>
         </header>
 
-        <Card className="shadow-xl border-none overflow-hidden bg-white">
-          <CardHeader className="flex flex-row items-center justify-between p-8 bg-white border-b border-slate-100">
-            <CardTitle className="text-2xl font-bold text-slate-800">Escalas de Serviço</CardTitle>
-            <div className="flex items-center gap-4">
+        <div className="flex gap-2 mb-4 bg-slate-200/50 p-1 rounded-lg w-fit border border-slate-200">
+          <Button 
+            variant={abaAtiva === 'disponiveis' ? 'secondary' : 'ghost'} 
+            size="sm" 
+            onClick={() => setAbaAtiva('disponiveis')}
+            className={abaAtiva === 'disponiveis' ? 'bg-white shadow-sm text-blue-600 font-bold' : 'text-slate-500'}
+          >
+            <CalendarCheck className="size-4 mr-2" /> Escalas Disponíveis
+          </Button>
+          <Button 
+            variant={abaAtiva === 'arquivadas' ? 'secondary' : 'ghost'} 
+            size="sm" 
+            onClick={() => setAbaAtiva('arquivadas')}
+            className={abaAtiva === 'arquivadas' ? 'bg-white shadow-sm text-blue-600 font-bold' : 'text-slate-500'}
+          >
+            <Archive className="size-4 mr-2" /> Arquivadas (Histórico)
+          </Button>
+        </div>
+
+        <Card className="shadow-xl border-none bg-white">
+          <CardHeader className="flex flex-row items-center justify-between p-8 border-b">
+            <div>
+              <CardTitle className="text-xl text-slate-800">
+                {abaAtiva === 'disponiveis' ? 'Escalas Recentes' : 'Arquivo Geral'}
+              </CardTitle>
+              <p className="text-xs text-slate-400 mt-1 uppercase font-medium tracking-wider">
+                Total de {escalasExibidas.length} registros encontrados
+              </p>
+            </div>
+            <div className="flex gap-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-                <Input 
-                  placeholder="Filtrar por data, unidade, dia ou operador..." 
-                  className="w-96 pl-10 bg-slate-50 border-slate-200 focus:ring-blue-500 transition-all" 
-                  value={busca} 
-                  onChange={(e) => setBusca(e.target.value)} 
-                />
+                <Input placeholder="Localizar escala..." className="w-80 pl-10 h-10" value={busca} onChange={(e) => setBusca(e.target.value)} />
               </div>
               {podeEditar && (
-                <Button onClick={() => setView('nova')} className="bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-200">
+                <Button onClick={() => setView('nova')} className="bg-blue-600 hover:bg-blue-700 h-10">
                   <Plus className="mr-2 h-4 w-4" /> Nova Escala
                 </Button>
               )}
@@ -164,73 +199,58 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
-              <div className="py-32 flex flex-col items-center gap-4">
-                <Loader2 className="animate-spin size-10 text-blue-600" />
-                <p className="text-slate-500 animate-pulse">Sincronizando com o banco de dados...</p>
-              </div>
+              <div className="py-20 flex flex-col items-center gap-4"><Loader2 className="animate-spin size-10 text-blue-600" /><p className="text-slate-400 font-medium">Carregando dados...</p></div>
             ) : (
               <Table>
-                <TableHeader className="bg-slate-50/80">
+                <TableHeader className="bg-slate-50/50">
                   <TableRow>
-                    <TableHead className="px-8 py-4 font-semibold text-slate-700">Data e Identificação</TableHead>
-                    <TableHead className="text-center font-semibold text-slate-700">Unidade</TableHead>
-                    <TableHead className="text-center font-semibold text-slate-700">Criado por</TableHead>
-                    <TableHead className="text-center font-semibold text-slate-700">Viagens</TableHead>
-                    <TableHead className="text-right px-8 font-semibold text-slate-700">Ações</TableHead>
+                    <TableHead className="px-8 py-4 font-bold text-slate-600">Data de Serviço</TableHead>
+                    <TableHead className="text-center font-bold text-slate-600">Unidade/Garagem</TableHead>
+                    <TableHead className="text-center font-bold text-slate-600">Responsável</TableHead>
+                    <TableHead className="text-center font-bold text-slate-600">Volume</TableHead>
+                    <TableHead className="text-center font-bold text-slate-600 px-8">Gerenciar</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {escalasFiltradas.length === 0 ? (
+                  {escalasExibidas.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-20 text-slate-400 italic">
-                        Nenhuma escala encontrada no sistema.
+                        Nenhum registro encontrado para este filtro.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    escalasFiltradas.map((escala) => (
-                      <TableRow key={escala.id} className="hover:bg-slate-50/80 transition-all border-b border-slate-50 last:border-0">
-                        <TableCell className="px-8 py-4">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="font-bold text-slate-900 text-lg">
-                              {new Date(escala.data_escala).toLocaleDateString('pt-BR')}
-                            </span>
-                            <span className="text-[11px] font-bold px-3 py-1 bg-blue-50 text-blue-600 rounded-full w-fit uppercase tracking-wider">
-                              {escala.dia_semana_texto}
-                            </span>
+                    escalasExibidas.map((escala) => (
+                      <TableRow key={escala.id} className="hover:bg-blue-50/30 transition-colors">
+                        <TableCell className="px-8 py-5">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-900 text-base">{new Date(escala.data_escala).toLocaleDateString('pt-BR')}</span>
+                            <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">{escala.dia_semana_texto}</span>
                           </div>
                         </TableCell>
                         <TableCell className="text-center">
-                          <span className="font-semibold text-slate-700">{escala.garagens?.nome || 'Geral'}</span>
+                           <Badge variant="outline" className="font-semibold px-3 py-1 bg-slate-50">{escala.garagens?.nome || 'Geral'}</Badge>
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex flex-col items-center">
-                            <span className="text-sm font-bold text-slate-800">{escala.perfis_usuarios?.nome || 'Sistema'}</span>
-                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
-                              <Clock className="size-3" /> {escala.hora_criacao?.slice(0,5)}
+                            <span className="text-sm font-bold text-slate-700">
+                              {escala.perfis_usuarios?.nome || (escala.criado_por === userId ? userName : 'Sistema')}
+                            </span>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
+                              <Clock className="size-3" /> Criado às {escala.hora_criacao?.slice(0,5) || '--:--'}
                             </div>
                           </div>
                         </TableCell>
                         <TableCell className="text-center">
-                          <span className="inline-flex items-center justify-center px-3 py-1 rounded-md bg-slate-100 text-slate-600 text-sm font-medium">
-                            {escala.escala_viagens?.length || 0} viagens
-                          </span>
+                          <span className="text-sm font-bold text-slate-600">{escala.escala_viagens?.length || 0} viagens</span>
                         </TableCell>
-                        <TableCell className="text-right px-8">
-                          <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => { setEscalaSelecionada(escala); setView('visualizar'); }} className="h-9 hover:bg-slate-100 border-slate-200">
-                              <Eye className="size-4 mr-2" /> Ver
-                            </Button>
+                        <TableCell className="text-center px-8">
+                          <div className="flex justify-center gap-2">
+                            <Button variant="outline" size="sm" className="h-8 w-8 p-0" title="Visualizar" onClick={() => { setEscalaSelecionada(escala); setView('visualizar'); }}><Eye className="size-4 text-slate-600" /></Button>
                             {podeEditar && (
                               <>
-                                <Button variant="outline" size="sm" onClick={() => { setEscalaSelecionada(escala); setView('editar'); }} className="h-9 text-blue-600 border-blue-100 hover:bg-blue-50">
-                                  <Edit className="size-4" />
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => handleDuplicar(escala)} className="h-9 text-green-600 border-green-100 hover:bg-green-50">
-                                  <Copy className="size-4" />
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => handleExcluir(escala.id)} className="h-9 text-red-500 hover:bg-red-50">
-                                  <Trash2 className="size-4" />
-                                </Button>
+                                <Button variant="outline" size="sm" className="h-8 w-8 p-0 border-blue-100 hover:bg-blue-50" title="Editar" onClick={() => { setEscalaSelecionada(escala); setView('editar'); }}><Edit className="size-4 text-blue-600" /></Button>
+                                <Button variant="outline" size="sm" className="h-8 w-8 p-0 border-green-100 hover:bg-green-50" title="Duplicar" onClick={() => handleDuplicar(escala)}><Copy className="size-4 text-green-600" /></Button>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-red-50" title="Excluir" onClick={() => handleExcluir(escala.id)}><Trash2 className="size-4 text-red-500" /></Button>
                               </>
                             )}
                           </div>
@@ -243,7 +263,25 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
             )}
           </CardContent>
         </Card>
+
+        <footer className="mt-16 flex flex-col items-center justify-center border-t border-slate-200 pt-10 pb-12">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.25em] text-center">
+            © {new Date().getFullYear()} SISTEMA DE GESTÃO MAXTOUR - TODOS OS DIREITOS RESERVADOS
+          </p>
+          <div className="flex items-center gap-2 mt-3">
+            <div className="h-px w-8 bg-blue-200"></div>
+            <p className="text-[11px] text-blue-600 font-black uppercase tracking-widest">
+              JOÃO VITOR SILVA FERREIRA
+            </p>
+            <div className="h-px w-8 bg-blue-200"></div>
+          </div>
+        </footer>
       </div>
     </div>
   );
+}
+
+function Badge({ children, variant, className }: any) {
+  const styles = variant === 'outline' ? 'border border-slate-200 text-slate-600' : 'bg-slate-100 text-slate-800';
+  return <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-bold ${styles} ${className}`}>{children}</span>;
 }
