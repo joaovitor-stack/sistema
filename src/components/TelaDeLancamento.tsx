@@ -31,10 +31,11 @@ interface TelaDeLancamentoProps {
   userId: string;
   userName: string;
   userRole: UserRole;
+  roleId: string; 
   onLogout: () => void;
 }
 
-export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaDeLancamentoProps) {
+export function TelaDeLancamento({ userId, userName, userRole, roleId, onLogout }: TelaDeLancamentoProps) {
   const [view, setView] = useState<'lista' | 'nova' | 'admin' | 'visualizar' | 'editar'>('lista');
   const [abaAtiva, setAbaAtiva] = useState<'disponiveis' | 'arquivadas'>('disponiveis');
   const [busca, setBusca] = useState('');
@@ -47,17 +48,9 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
   async function carregarEscalas() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('escalas')
-        .select(`
-          *,
-          garagens (nome),
-          escala_viagens (id),
-          perfis_usuarios!criado_por (nome)
-        `)
-        .order('data_escala', { ascending: false });
-
-      if (error) throw error;
+      const response = await fetch('http://localhost:3333/api/escalas');
+      if (!response.ok) throw new Error('Erro ao buscar escalas');
+      const data = await response.json();
       setEscalas(data || []);
     } catch (error) {
       console.error(error);
@@ -84,24 +77,17 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
 
   const handleDuplicar = async (escala: any) => {
     try {
-      const { data: novaEscala, error: errE } = await supabase
-        .from('escalas')
-        .insert([{
-          data_escala: escala.data_escala,
-          garagem_id: escala.garagem_id,
-          dia_semana_texto: escala.dia_semana_texto,
-          criado_por: userId,
-          hora_criacao: new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' })
-        }])
-        .select().single();
+      const response = await fetch('http://localhost:3333/api/escalas/duplicar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          escalaId: escala.id,
+          userId: userId
+        })
+      });
 
-      if (errE) throw errE;
+      if (!response.ok) throw new Error('Falha na duplicação');
 
-      const { data: viagens } = await supabase.from('escala_viagens').select('*').eq('escala_id', escala.id);
-      if (viagens && viagens.length > 0) {
-        const novasViagens = viagens.map(({ id, created_at, ...v }) => ({ ...v, escala_id: novaEscala.id }));
-        await supabase.from('escala_viagens').insert(novasViagens);
-      }
       toast.success("Escala duplicada com sucesso!");
       carregarEscalas();
     } catch (error) { 
@@ -110,13 +96,18 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
     }
   };
 
+  // CORREÇÃO NO FILTRO: Usando o meio do dia para comparar datas sem erro de fuso
   const filtrarEscalas = (lista: any[]) => {
     const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    
     const limite15Dias = new Date();
     limite15Dias.setDate(hoje.getDate() - 15);
+    limite15Dias.setHours(0, 0, 0, 0);
 
     return lista.filter(e => {
-      const dataEscala = new Date(e.data_escala);
+      // Adicionamos T12:00:00 apenas para a lógica de comparação de "arquivados"
+      const dataEscala = new Date(e.data_escala + "T12:00:00");
       const ehRecente = dataEscala >= limite15Dias;
 
       if (abaAtiva === 'disponiveis' && !ehRecente) return false;
@@ -134,7 +125,7 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
 
   const escalasExibidas = filtrarEscalas(escalas);
 
-  if (view === 'admin') return <AdminMenu onVoltar={() => setView('lista')} userRole={userRole} />;
+  if (view === 'admin') return <AdminMenu onVoltar={() => setView('lista')} userRole={userRole} roleId={roleId} />;
   if (view === 'nova') return <CriarNovaEscala userId={userId} onSave={() => setView('lista')} onBack={() => setView('lista')} />;
   if (view === 'visualizar' && escalaSelecionada) return <VisualizarEscala dados={escalaSelecionada} onBack={() => { setEscalaSelecionada(null); setView('lista'); }} />;
   if (view === 'editar' && escalaSelecionada) return <EditarEscala escalaOriginal={escalaSelecionada} onBack={() => { setEscalaSelecionada(null); setView('lista'); }} />;
@@ -188,7 +179,12 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
             <div className="flex gap-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-                <Input placeholder="Localizar escala..." className="w-80 pl-10 h-10" value={busca} onChange={(e) => setBusca(e.target.value)} />
+                <input 
+                  placeholder="Localizar escala..." 
+                  className="w-80 pl-10 h-10 border rounded-md text-sm" 
+                  value={busca} 
+                  onChange={(e) => setBusca(e.target.value)} 
+                />
               </div>
               {podeEditar && (
                 <Button onClick={() => setView('nova')} className="bg-blue-600 hover:bg-blue-700 h-10">
@@ -223,12 +219,17 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
                       <TableRow key={escala.id} className="hover:bg-blue-50/30 transition-colors">
                         <TableCell className="px-8 py-5">
                           <div className="flex flex-col">
-                            <span className="font-bold text-slate-900 text-base">{new Date(escala.data_escala).toLocaleDateString('pt-BR')}</span>
-                            <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">{escala.dia_semana_texto}</span>
+                            {/* CORREÇÃO DEFINITIVA: Exibindo a data literal do banco sem passar pelo new Date() */}
+                            <span className="font-bold text-slate-900 text-base">
+                              {escala.data_escala.split('-').reverse().join('/')}
+                            </span>
+                            <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">
+                              {escala.dia_semana_texto}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell className="text-center">
-                           <Badge variant="outline" className="font-semibold px-3 py-1 bg-slate-50">{escala.garagens?.nome || 'Geral'}</Badge>
+                            <Badge variant="outline" className="font-semibold px-3 py-1 bg-slate-50">{escala.garagens?.nome || 'Geral'}</Badge>
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex flex-col items-center">
@@ -264,6 +265,7 @@ export function TelaDeLancamento({ userId, userName, userRole, onLogout }: TelaD
           </CardContent>
         </Card>
 
+        {/* Footer mantido conforme original */}
         <footer className="mt-16 flex flex-col items-center justify-center border-t border-slate-200 pt-10 pb-12">
           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.25em] text-center">
             © {new Date().getFullYear()} SISTEMA DE GESTÃO MAXTOUR - TODOS OS DIREITOS RESERVADOS

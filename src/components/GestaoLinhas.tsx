@@ -7,7 +7,11 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { toast } from 'sonner';
-import { supabase } from '../lib/supabase'; // Importação do Supabase
+// importado anteriormente: import { supabase } from '../lib/supabase';
+// Removido pois agora buscamos dados via API Express.
+
+// Definimos a URL base da API; ajuste conforme a porta do backend.
+const API_URL = 'http://localhost:3333';
 
 interface LinhaCadastrada {
   id: string;
@@ -24,44 +28,20 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
   const [clientesCadastrados, setClientesCadastrados] = useState<{id: string, nome: string}[]>([]);
   const [novaLinha, setNovaLinha] = useState({ codigo: '', nome: '', clienteId: '' });
 
-  // Carregar Dados do Supabase
+  // Carregar dados via API (clientes e linhas)
   async function carregarDados() {
     setLoading(true);
     try {
-      // 1. Carregar Clientes para o Select
-      const { data: clientesData } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .order('nome');
-      
-      if (clientesData) setClientesCadastrados(clientesData);
-
-      // 2. Carregar Linhas com Join em Clientes
-      const { data: linhasData, error } = await supabase
-        .from('linhas')
-        .select(`
-          id, 
-          codigo, 
-          nome, 
-          cliente_id,
-          clientes (nome)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      if (linhasData) {
-        const formatadas: LinhaCadastrada[] = linhasData.map((item: any) => ({
-          id: item.id,
-          codigo: item.codigo,
-          nome: item.nome,
-          clienteId: item.cliente_id,
-          clienteNome: item.clientes?.nome || 'Cliente não encontrado'
-        }));
-        setLinhas(formatadas);
+      const response = await fetch(`${API_URL}/linhas/dados-completos`);
+      if (!response.ok) {
+        throw new Error('Não foi possível obter dados do servidor.');
       }
+      const data = await response.json();
+      // data deve ter propriedades: clientes e linhas
+      setClientesCadastrados(Array.isArray(data.clientes) ? data.clientes : []);
+      setLinhas(Array.isArray(data.linhas) ? data.linhas : []);
     } catch (error: any) {
-      toast.error("Erro ao carregar dados: " + error.message);
+      toast.error('Erro ao carregar dados: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -81,24 +61,29 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('linhas')
-        .insert([
-          { 
-            codigo: novaLinha.codigo, 
-            nome: novaLinha.nome, 
-            cliente_id: novaLinha.clienteId 
-          }
-        ]);
-
-      if (error) throw error;
-
-      toast.success("Linha cadastrada com sucesso!");
+      const response = await fetch(`${API_URL}/linhas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codigo: novaLinha.codigo,
+          nome: novaLinha.nome,
+          cliente_id: novaLinha.clienteId,
+        }),
+      });
+      if (!response.ok) {
+        let errMsg = 'Erro ao salvar no servidor.';
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+      toast.success('Linha cadastrada com sucesso!');
       setIsCriando(false);
       setNovaLinha({ codigo: '', nome: '', clienteId: '' });
       carregarDados();
     } catch (error: any) {
-      toast.error("Erro ao salvar: " + error.message);
+      toast.error('Erro ao salvar: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -109,17 +94,21 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('linhas')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
-      toast.success("Linha removida.");
+      const response = await fetch(`${API_URL}/linhas/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        let errMsg = 'Erro ao remover no servidor.';
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+      toast.success('Linha removida.');
       carregarDados();
     } catch (error: any) {
-      toast.error("Erro ao remover: " + error.message);
+      toast.error('Erro ao remover: ' + error.message);
     } finally {
       setLoading(false);
     }

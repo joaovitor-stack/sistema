@@ -6,13 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Save, Plus, Trash2, ArrowLeft, UserPlus, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '../lib/supabase';
 
 // --- INTERFACES ---
 interface Motorista {
   id: string;
   nome: string;
-  numeroRegistro: string;
+  numeroRegistro: string; // CamelCase para uso interno no React
   categoria_id: string;
   garagem_id: string;
 }
@@ -27,16 +26,15 @@ interface GestaoMotoristasProps {
 }
 
 export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
-  // Estados para dados
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [garagens, setGaragens] = useState<ItemDominio[]>([]);
   const [categorias, setCategorias] = useState<ItemDominio[]>([]);
-  
-  // Estados de controle
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Carregar dados ao montar o componente
+  // CORREÇÃO: Porta atualizada para 3333 conforme seu ajuste no backend
+  const API_URL = 'http://localhost:3333'; 
+
   useEffect(() => {
     fetchDadosIniciais();
   }, []);
@@ -44,50 +42,31 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
   async function fetchDadosIniciais() {
     try {
       setLoading(true);
+      const response = await fetch(`${API_URL}/motoristas/dados-completos`);
       
-      // 1. Busca Tabelas de Domínio (Garagens e Categorias conforme seu SQL)
-      const { data: dataGaragens, error: errGaragens } = await supabase
-        .from('garagens')
-        .select('id, nome')
-        .order('nome');
+      if (!response.ok) {
+        throw new Error("Não foi possível obter dados do servidor.");
+      }
       
-      const { data: dataCategorias, error: errCategorias } = await supabase
-        .from('categorias_motorista')
-        .select('id, nome')
-        .order('nome');
+      const data = await response.json();
 
-      if (errGaragens || errCategorias) throw new Error("Erro ao carregar tabelas de apoio.");
+      setGaragens(data.garagens || []);
+      setCategorias(data.categorias || []);
 
-      setGaragens(dataGaragens || []);
-      setCategorias(dataCategorias || []);
-
-      // 2. Busca Motoristas cadastrados
-      const { data: dataMotoristas, error: errMotoristas } = await supabase
-        .from('motoristas')
-        .select(`
-          id, 
-          nome, 
-          numero_registro, 
-          categoria_id, 
-          garagem_id
-        `)
-        .order('nome');
-
-      if (errMotoristas) throw errMotoristas;
-
-      // Mapeia os nomes das colunas do banco (snake_case) para o estado (camelCase)
-      const motoristasFormatados = (dataMotoristas || []).map(m => ({
+      // CORREÇÃO: Mapeamento explícito de numero_registro (DB) para numeroRegistro (React)
+      // Isso garante que os motoristas cadastrados apareçam na tabela
+      const motoristasFormatados = (data.motoristas || []).map((m: any) => ({
         id: m.id,
         nome: m.nome,
-        numeroRegistro: m.numero_registro,
+        numeroRegistro: m.numero_registro || '', 
         categoria_id: m.categoria_id,
         garagem_id: m.garagem_id
       }));
 
       setMotoristas(motoristasFormatados);
     } catch (error: any) {
-      console.error("Erro no fetch:", error);
-      toast.error("Erro ao carregar dados: " + error.message);
+      console.error("Erro no fetch inicial:", error);
+      toast.error("Erro de conexão: Verifique se o backend está rodando na porta 3333.");
     } finally {
       setLoading(false);
     }
@@ -112,22 +91,19 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
   };
 
   const handleRemove = async (id: string) => {
-    // Se for um item que ainda não foi salvo no banco (ID temporário)
     if (id.startsWith('temp-')) {
       setMotoristas(prev => prev.filter(m => m.id !== id));
       return;
     }
 
-    // Se já estiver no banco, confirma a exclusão real
-    if (!confirm("Esta ação excluirá o motorista permanentemente do banco de dados. Confirmar?")) return;
+    if (!confirm("Esta ação excluirá o motorista permanentemente. Confirmar?")) return;
 
     try {
-      const { error } = await supabase
-        .from('motoristas')
-        .delete()
-        .eq('id', id);
+      const response = await fetch(`${API_URL}/motoristas/${id}`, {
+        method: 'DELETE'
+      });
 
-      if (error) throw error;
+      if (!response.ok) throw new Error("Erro ao excluir no servidor.");
       
       setMotoristas(prev => prev.filter(m => m.id !== id));
       toast.success("Motorista removido com sucesso.");
@@ -137,52 +113,44 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
   };
 
   const salvarAlteracoes = async () => {
-    // Validação de campos obrigatórios
     const temCamposVazios = motoristas.some(
       m => !m.nome.trim() || !m.numeroRegistro.trim() || !m.categoria_id || !m.garagem_id
     );
 
     if (temCamposVazios) {
-      return toast.error("Todos os campos (Nome, RE, Garagem e Categoria) são obrigatórios.");
+      return toast.error("Todos os campos são obrigatórios.");
     }
 
     try {
       setSaving(true);
       
-      // PREPARAÇÃO DO PAYLOAD PARA RESOLVER O ERRO DE "NULL VALUE IN COLUMN ID"
-      const payload = motoristas.map(m => {
-        // Criamos um objeto base com as colunas do banco
-        const registro: any = {
-          nome: m.nome,
-          numero_registro: m.numeroRegistro,
-          categoria_id: m.categoria_id,
-          garagem_id: m.garagem_id
-        };
+      // CORREÇÃO: Enviamos 'numero_registro' (snake_case) para o backend processar no Supabase
+      const payload = motoristas.map(m => ({
+        id: m.id, 
+        nome: m.nome,
+        numero_registro: m.numeroRegistro, 
+        categoria_id: m.categoria_id,
+        garagem_id: m.garagem_id
+      }));
 
-        // Regra de Ouro:
-        // Se o ID NÃO for temporário, incluímos ele para o Supabase fazer UPDATE.
-        // Se o ID FOR temporário, NÃO enviamos a chave 'id', permitindo que o 
-        // Postgres gere o UUID automaticamente via DEFAULT gen_random_uuid().
-        if (!m.id.startsWith('temp-')) {
-          registro.id = m.id;
-        }
-
-        return registro;
+      const response = await fetch(`${API_URL}/motoristas/salvar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload })
       });
 
-      const { error } = await supabase
-        .from('motoristas')
-        .upsert(payload, { onConflict: 'id' });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao salvar no servidor.");
+      }
 
-      if (error) throw error;
-
-      toast.success("Alterações salvas no banco de dados!");
+      toast.success("Alterações sincronizadas com sucesso!");
       
-      // Recarrega para obter os IDs oficiais gerados pelo banco para os novos registros
+      // Recarrega para obter os IDs reais gerados pelo banco
       await fetchDadosIniciais();
     } catch (error: any) {
       console.error("Erro ao salvar:", error);
-      toast.error("Erro ao salvar: " + (error.message || "Erro desconhecido"));
+      toast.error("Erro ao salvar: " + error.message);
     } finally {
       setSaving(false);
     }
@@ -190,59 +158,34 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      {/* HEADER FIXO */}
+      {/* HEADER */}
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
-          <Button 
-            variant="outline" 
-            onClick={onBack} 
-            className="bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
-          >
+          <Button variant="outline" onClick={onBack} className="bg-white border-slate-200">
             <ArrowLeft className="size-4 mr-2" /> Voltar
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
               <UserPlus className="text-blue-600" /> Gestão de Motoristas
             </h1>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">
-              Cadastro e Manutenção de Colaboradores
-            </p>
+            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Cadastro de Colaboradores</p>
           </div>
         </div>
 
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            onClick={fetchDadosIniciais} 
-            disabled={loading || saving}
-            className="bg-white"
-          >
+          <Button variant="outline" onClick={fetchDadosIniciais} disabled={loading || saving} className="bg-white">
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button 
-            onClick={salvarAlteracoes} 
-            disabled={saving || loading}
-            className="bg-green-600 hover:bg-green-700 text-white shadow-md min-w-[180px]"
-          >
-            {saving ? (
-              <><Loader2 className="size-4 mr-2 animate-spin" /> Salvando...</>
-            ) : (
-              <><Save className="size-4 mr-2" /> Salvar Alterações</>
-            )}
+          <Button onClick={salvarAlteracoes} disabled={saving || loading} className="bg-green-600 hover:bg-green-700 text-white min-w-[180px] shadow-md">
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" /> Salvando...</> : <><Save className="size-4 mr-2" /> Salvar Alterações</>}
           </Button>
         </div>
       </div>
 
       <Card className="max-w-7xl mx-auto shadow-xl border-slate-200 overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between border-b bg-white py-4">
-          <CardTitle className="text-sm font-bold uppercase text-slate-600 tracking-tight">
-            Listagem de Motoristas Ativos
-          </CardTitle>
-          <Button 
-            size="sm" 
-            onClick={handleAddMotorista} 
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
-          >
+          <CardTitle className="text-sm font-bold uppercase text-slate-600">Listagem de Motoristas</CardTitle>
+          <Button size="sm" onClick={handleAddMotorista} className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
             <Plus className="size-4 mr-1" /> Adicionar Novo
           </Button>
         </CardHeader>
@@ -251,7 +194,7 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-slate-400">
               <Loader2 className="size-8 animate-spin mb-4 text-blue-500" />
-              <p className="font-medium">Carregando dados do banco...</p>
+              <p className="font-medium">Carregando dados do servidor...</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -268,70 +211,41 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
                 <TableBody className="bg-white">
                   {motoristas.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-20">
-                        <div className="flex flex-col items-center text-slate-400">
-                          <UserPlus size={40} className="mb-2 opacity-20" />
-                          <p>Nenhum motorista encontrado.</p>
-                          <p className="text-xs">Clique em "Adicionar Novo" para começar.</p>
-                        </div>
+                      <TableCell colSpan={5} className="text-center py-20 text-slate-400">
+                        Nenhum motorista encontrado. Clique em "Adicionar Novo".
                       </TableCell>
                     </TableRow>
                   ) : (
                     motoristas.map((m) => (
                       <TableRow key={m.id} className="hover:bg-slate-50/80 transition-colors">
                         <TableCell>
-                          <Input 
-                            value={m.nome} 
-                            onChange={e => handleUpdate(m.id, 'nome', e.target.value)}
-                            placeholder="Nome Completo"
-                            className="h-9 border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
-                          />
+                          <Input value={m.nome} onChange={e => handleUpdate(m.id, 'nome', e.target.value)} placeholder="Nome" className="h-9" />
                         </TableCell>
                         <TableCell>
-                          <Input 
-                            value={m.numeroRegistro} 
-                            onChange={e => handleUpdate(m.id, 'numeroRegistro', e.target.value)}
-                            placeholder="Ex: 00123"
-                            className="h-9 border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
-                          />
+                          <Input value={m.numeroRegistro} onChange={e => handleUpdate(m.id, 'numeroRegistro', e.target.value)} placeholder="Registro" className="h-9" />
                         </TableCell>
                         <TableCell>
-                          <Select 
-                            value={m.garagem_id} 
-                            onValueChange={val => handleUpdate(m.id, 'garagem_id', val)}
-                          >
+                          <Select value={m.garagem_id} onValueChange={val => handleUpdate(m.id, 'garagem_id', val)}>
                             <SelectTrigger className="h-9 bg-white border-slate-200">
                               <SelectValue placeholder="Selecione..." />
                             </SelectTrigger>
                             <SelectContent className="bg-white">
-                              {garagens.map(g => (
-                                <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>
-                              ))}
+                              {garagens.map(g => <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Select 
-                            value={m.categoria_id} 
-                            onValueChange={val => handleUpdate(m.id, 'categoria_id', val)}
-                          >
+                          <Select value={m.categoria_id} onValueChange={val => handleUpdate(m.id, 'categoria_id', val)}>
                             <SelectTrigger className="h-9 bg-white border-slate-200">
                               <SelectValue placeholder="Selecione..." />
                             </SelectTrigger>
                             <SelectContent className="bg-white">
-                              {categorias.map(c => (
-                                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
-                              ))}
+                              {categorias.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </TableCell>
                         <TableCell className="text-center">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => handleRemove(m.id)}
-                            className="hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => handleRemove(m.id)} className="text-slate-400 hover:text-red-500 transition-colors">
                             <Trash2 size={16} />
                           </Button>
                         </TableCell>
@@ -345,9 +259,8 @@ export function GestaoMotoristas({ onBack }: GestaoMotoristasProps) {
         </CardContent>
       </Card>
       
-      {/* RODAPÉ INFORMATIVO */}
-      <div className="max-w-7xl mx-auto mt-4 px-2">
-        <p className="text-[10px] text-slate-400 uppercase font-bold text-right italic">
+      <div className="max-w-7xl mx-auto mt-4 px-2 text-right">
+        <p className="text-[10px] text-slate-400 uppercase font-bold italic">
           Total de Colaboradores: {motoristas.length}
         </p>
       </div>

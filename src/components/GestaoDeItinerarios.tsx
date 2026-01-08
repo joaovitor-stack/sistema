@@ -9,10 +9,33 @@ import { toast } from 'sonner';
 import { Badge } from './ui/badge';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { supabase } from '../lib/supabase';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 
-// --- INTERFACES ---
+async function fetchJSON(url: string, options: RequestInit = {}): Promise<any> {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  const contentType = response.headers.get('content-type') || '';
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Erro ${response.status} em ${url}`);
+  }
+
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(`Resposta não-JSON em ${url}. Início: ${text.slice(0, 200)}`);
+  }
+
+  return await response.json();
+}
+
 interface Parada {
   id: string;
   ordem: number;
@@ -28,13 +51,12 @@ interface Itinerario {
   nomeCliente: string;
   linhaId: string;
   nomeLinha: string;
-  garagem: string; // No código trataremos como o ID da garagem para o banco
+  garagem: string; 
   turno: string;
-  tipoVeiculo: string; // No código trataremos como o ID do tipo para o banco
+  tipoVeiculo: string; 
   diasSemana: string[];
   paradas: Parada[];
   dataUltimaAtualizacao?: string;
-  // Campos auxiliares para exibição
   garagem_nome?: string; 
 }
 
@@ -52,11 +74,8 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   const [clientes, setClientes] = useState<any[]>([]);
   const [linhasExistentes, setLinhasExistentes] = useState<any[]>([]);
   const [itinerarios, setItinerarios] = useState<Itinerario[]>([]);
-  
-  // NOVOS ESTADOS PARA RESOLVER O ERRO DE FK
   const [garagensLista, setGaragensLista] = useState<any[]>([]);
   const [tiposVeiculoLista, setTiposVeiculoLista] = useState<any[]>([]);
-  
   const [loading, setLoading] = useState(true);
   const [modoEdicao, setModoEdicao] = useState(false);
   const [busca, setBusca] = useState('');
@@ -78,113 +97,117 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   async function fetchData() {
     try {
       setLoading(true);
-      // Carrega dados de apoio
-      const { data: clis } = await supabase.from('clientes').select('*').order('nome');
-      const { data: lins } = await supabase.from('linhas').select('id, nome, cliente_id').order('nome');
-      
-      // AJUSTE: Buscar garagens e tipos de veículos reais do banco
-      const { data: gars } = await supabase.from('garagens').select('*').order('nome');
-      const { data: tpsV } = await supabase.from('tipos_veiculo').select('*').order('nome');
-      
-      setGaragensLista(gars || []);
-      setTiposVeiculoLista(tpsV || []);
 
-      const { data: itins, error } = await supabase
-        .from('itinerarios')
-        .select(`
-          *,
-          garagens(nome),
-          itinerarios_dias(dia_id, dias_semana(codigo)),
-          itinerario_paradas(*)
-        `)
-        .order('created_at', { ascending: false });
+      const [clisRes, linsRes, garsRes, tpsVRes, itinsRes] = await Promise.all([
+        fetchJSON('/api/clientes'),
+        fetchJSON('/api/linhas/dados-completos'),
+        fetchJSON('/api/garagens'),
+        fetchJSON('/api/tipos-veiculo'),
+        fetchJSON('/api/itinerarios'),
+      ]);
 
-      if (error) throw error;
+      const clis = Array.isArray(clisRes) ? clisRes : (Array.isArray(clisRes?.data) ? clisRes.data : []);
 
-      const itinsMapped = (itins || []).map(i => ({
+      // ✅ 1) CORREÇÃO DO PARSE DAS LINHAS
+      // O endpoint retorna { clientes: [...], linhas: [...] }
+      const linsRaw = Array.isArray(linsRes) ? linsRes : 
+                      Array.isArray(linsRes?.linhas) ? linsRes.linhas : 
+                      Array.isArray(linsRes?.data) ? linsRes.data : [];
+
+      // ✅ 2) NORMALIZAÇÃO DO VÍNCULO (clienteId camelCase vindo do banco)
+      const lins = linsRaw.map((l: any) => ({
+        ...l,
+        cliente_id: l?.clienteId ? String(l.clienteId) : (l?.cliente_id ? String(l.cliente_id) : ''),
+      }));
+
+      const gars = Array.isArray(garsRes) ? garsRes : (Array.isArray(garsRes?.data) ? garsRes.data : []);
+      const tpsV = Array.isArray(tpsVRes) ? tpsVRes : (Array.isArray(tpsVRes?.data) ? tpsVRes.data : []);
+      const itins = Array.isArray(itinsRes) ? itinsRes : (Array.isArray(itinsRes?.data) ? itinsRes.data : []);
+
+      setClientes(clis);
+      setLinhasExistentes(lins);
+      setGaragensLista(gars);
+      setTiposVeiculoLista(tpsV);
+
+      const itinsMapped: Itinerario[] = itins.map((i: any) => ({
         id: i.id,
         clienteId: i.cliente_id,
         nomeCliente: i.nome_cliente_snapshot,
         linhaId: i.linha_id,
         nomeLinha: i.nome_linha_snapshot,
-        garagem: i.garagem_id, // Guardamos o UUID
-        garagem_nome: i.garagens?.nome, // Para exibição amigável
+        garagem: i.garagem_id,
+        garagem_nome: i.garagens?.nome,
         turno: i.turno_codigo,
         tipoVeiculo: i.tipo_veiculo_id,
         dataUltimaAtualizacao: i.data_ultima_atualizacao,
-        diasSemana: i.itinerarios_dias?.map((d: any) => d.dias_semana.codigo) || [],
-        paradas: i.itinerario_paradas?.sort((a: any, b: any) => a.ordem - b.ordem) || []
+        diasSemana: Array.isArray(i.itinerarios_dias)
+          ? i.itinerarios_dias.map((d: any) => d?.dias_semana?.codigo).filter(Boolean)
+          : [],
+        paradas: Array.isArray(i.itinerario_paradas)
+          ? [...i.itinerario_paradas].sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          : [],
       }));
 
-      setClientes(clis || []);
-      setLinhasExistentes(lins || []);
       setItinerarios(itinsMapped);
     } catch (error: any) {
-      toast.error("Erro ao carregar dados: " + error.message);
+      toast.error('Erro ao carregar dados: ' + (error?.message || String(error)));
     } finally {
       setLoading(false);
     }
   }
 
+  // ✅ 3) AJUSTE DO FILTRO DE LINHAS (Garantiu comparação de Strings)
+  const linhasFiltradas = useMemo(() => {
+    if (!novoItin.clienteId) return [];
+    const cid = String(novoItin.clienteId);
+    return (linhasExistentes || []).filter((linha: any) => String(linha.cliente_id) === cid);
+  }, [novoItin.clienteId, linhasExistentes]);
+
+  // Restante das funções de UI e lógicas de salvar (preservadas conforme original)
   const salvarItinerario = async () => {
-    if (!novoItin.clienteId || !novoItin.linhaId || !novoItin.garagem) return toast.error("Preencha cliente, linha e garagem");
-    
+    if (!novoItin.clienteId || !novoItin.linhaId || !novoItin.garagem) {
+      return toast.error('Preencha cliente, linha e garagem');
+    }
     try {
       setLoading(true);
-      const dataHoje = new Date().toISOString().split('T')[0];
-      
-      const payloadItin = {
+      const payload = {
         id: novoItin.id || undefined,
-        cliente_id: novoItin.clienteId,
-        linha_id: novoItin.linhaId,
-        nome_cliente_snapshot: novoItin.nomeCliente,
-        nome_linha_snapshot: novoItin.nomeLinha,
-        garagem_id: novoItin.garagem, // Aqui agora vai o UUID do Select
-        turno_codigo: novoItin.turno,
-        tipo_veiculo_id: novoItin.tipoVeiculo, // Aqui agora vai o UUID do Select
-        data_ultima_atualizacao: dataHoje
-      };
-
-      const { data: itinSalvo, error: errorItin } = await supabase
-        .from('itinerarios')
-        .upsert(payloadItin)
-        .select()
-        .single();
-
-      if (errorItin) throw errorItin;
-
-      const currentItinId = itinSalvo.id;
-
-      // Salvar Dias
-      await supabase.from('itinerarios_dias').delete().eq('itinerario_id', currentItinId);
-      if (novoItin.diasSemana && novoItin.diasSemana.length > 0) {
-        const diasData = novoItin.diasSemana.map(cod => ({
-          itinerario_id: currentItinId,
-          dia_id: DIAS_OPCOES.find(d => d.id === cod)?.dbId
-        }));
-        await supabase.from('itinerarios_dias').insert(diasData);
-      }
-
-      // Salvar Paradas
-      await supabase.from('itinerario_paradas').delete().eq('itinerario_id', currentItinId);
-      if (novoItin.paradas && novoItin.paradas.length > 0) {
-        const paradasData = novoItin.paradas.map(p => ({
-          itinerario_id: currentItinId,
+        clienteId: novoItin.clienteId,
+        linhaId: novoItin.linhaId,
+        nomeCliente: novoItin.nomeCliente,
+        nomeLinha: novoItin.nomeLinha,
+        garagem: novoItin.garagem,
+        turno: novoItin.turno,
+        tipoVeiculo: novoItin.tipoVeiculo,
+        diasSemana: novoItin.diasSemana || [],
+        paradas: (novoItin.paradas || []).map((p) => ({
           ordem: p.ordem,
           horario: p.horario,
           referencia: p.referencia,
           bairro: p.bairro,
-          endereco: p.endereco
-        }));
-        await supabase.from('itinerario_paradas').insert(paradasData);
-      }
+          endereco: p.endereco,
+        })),
+      };
 
-      toast.success("Itinerário salvo com sucesso!");
+      if (novoItin.id) {
+        await fetchJSON(`/api/itinerarios/${novoItin.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await fetchJSON('/api/itinerarios', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+      toast.success('Itinerário salvo com sucesso!');
       setModoEdicao(false);
       setNovoItin({ id: '', clienteId: '', nomeCliente: '', linhaId: '', nomeLinha: '', garagem: '', turno: '', tipoVeiculo: '', diasSemana: [], paradas: [] });
-      fetchData();
+      await fetchData();
     } catch (error: any) {
-      toast.error("Erro ao salvar: " + error.message);
+      toast.error('Erro ao salvar: ' + (error?.message || String(error)));
     } finally {
       setLoading(false);
     }
@@ -198,12 +221,6 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
     );
   }, [busca, itinerarios]);
 
-  const linhasFiltradas = useMemo(() => {
-    if (!novoItin.clienteId) return [];
-    return linhasExistentes.filter(linha => linha.cliente_id === novoItin.clienteId);
-  }, [novoItin.clienteId, linhasExistentes]);
-
-  // --- FUNÇÕES DE EXPORTAÇÃO E IMPRESSÃO (PRESERVADAS) ---
   const handleExportarPDF = (itin: Itinerario) => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     doc.setFontSize(14);
@@ -212,7 +229,6 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
     doc.text(`CLIENTE: ${itin.nomeCliente?.toUpperCase()}`, 14, 25);
     doc.text(`LINHA: ${itin.nomeLinha?.toUpperCase()}`, 14, 31);
     doc.text(`TURNO: ${itin.turno} | DIAS: ${itin.diasSemana?.join(', ')}`, 14, 37);
-
     const tableRows = itin.paradas?.map(p => [p.ordem, p.horario, p.referencia?.toUpperCase(), p.bairro?.toUpperCase()]) || [];
     autoTable(doc, {
       startY: 42,
@@ -247,20 +263,19 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
   };
 
   const excluirItinerario = async (id: string) => {
-    if(!confirm("Deseja realmente excluir este itinerário?")) return;
+    if (!confirm('Deseja realmente excluir este itinerário?')) return;
     try {
-      const { error } = await supabase.from('itinerarios').delete().eq('id', id);
-      if (error) throw error;
-      toast.success("Excluído com sucesso");
-      fetchData();
+      await fetchJSON(`/api/itinerarios/${id}`, { method: 'DELETE' });
+      toast.success('Excluído com sucesso');
+      await fetchData();
     } catch (error: any) {
-      toast.error("Erro ao excluir: " + error.message);
+      toast.error('Erro ao excluir: ' + (error?.message || String(error)));
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
-      {/* AREA DE IMPRESSAO (PRESERVADA) */}
+      {/* AREA DE IMPRESSAO */}
       <div className="hidden print:block p-8 bg-white text-black">
         {itemParaImpressao && (
           <div className="border-2 border-black p-4">
@@ -311,7 +326,6 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                 <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                      <label className="text-[10px] font-bold uppercase text-slate-500">Garagem</label>
-                     {/* AJUSTE: O valor agora é o ID da garagem vindo do banco */}
                      <Select value={novoItin.garagem} onValueChange={(v) => setNovoItin({...novoItin, garagem: v})}>
                          <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                          <SelectContent className="bg-white">
@@ -336,12 +350,12 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                   <div>
                      <label className="text-[10px] font-bold uppercase text-slate-500">Linha</label>
                      <Select value={novoItin.linhaId} onValueChange={(v) => {
-                         const l = linhasExistentes.find(lin => lin.id === v);
+                         const l = linhasFiltradas.find((lin: any) => lin.id === v);
                          setNovoItin({...novoItin, linhaId: v, nomeLinha: l?.nome});
                      }} disabled={!novoItin.clienteId}>
                          <SelectTrigger className="bg-white"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                          <SelectContent className="bg-white">
-                             {linhasFiltradas.map(l => <SelectItem key={l.id} value={l.id}>{l.nome}</SelectItem>)}
+                             {linhasFiltradas.map((l: any) => <SelectItem key={l.id} value={l.id}>{l.nome}</SelectItem>)}
                          </SelectContent>
                      </Select>
                   </div>
@@ -357,7 +371,6 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                      </div>
                      <div>
                          <label className="text-[10px] font-bold uppercase text-slate-500">Veículo</label>
-                         {/* AJUSTE: O valor agora é o ID do tipo de veículo vindo do banco */}
                          <Select value={novoItin.tipoVeiculo} onValueChange={(v) => setNovoItin({...novoItin, tipoVeiculo: v})}>
                              <SelectTrigger className="bg-white"><SelectValue placeholder="Tipo" /></SelectTrigger>
                              <SelectContent className="bg-white">
@@ -472,7 +485,6 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
         )}
       </div>
 
-      {/* DIALOG DE VISUALIZAÇÃO (PRESERVADO) */}
       <Dialog open={!!visualizarItin} onOpenChange={() => setVisualizarItin(null)}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto bg-white">
           <DialogHeader>
@@ -480,6 +492,9 @@ export function GestaoItinerarios({ onBack }: { onBack: () => void }) {
                 <span className="text-orange-600 block text-xs font-bold">{visualizarItin?.nomeCliente}</span>
                 {visualizarItin?.nomeLinha}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Visualização do itinerário selecionado
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="flex gap-4 text-[10px] font-bold uppercase text-slate-500 bg-slate-50 p-2 rounded">

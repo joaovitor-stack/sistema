@@ -25,7 +25,7 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
   const [escalaCompleta, setEscalaCompleta] = useState<any>(null);
   const [agora, setAgora] = useState(new Date());
 
-  // Atualiza o relógio a cada minuto para o monitoramento em tempo real
+  // Atualiza o relógio a cada minuto para re-ordenar a lista automaticamente
   useEffect(() => {
     const timer = setInterval(() => setAgora(new Date()), 60000);
     return () => clearInterval(timer);
@@ -48,6 +48,13 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
           .single();
 
         if (error) throw error;
+        // Se existir turno na viagem, usa; senão, utiliza turno_codigo ou mantém '---'.
+        if (data && data.escala_viagens) {
+          data.escala_viagens = data.escala_viagens.map((v: any) => ({
+            ...v,
+            turno: v.turno || v.turno_codigo || '---'
+          }));
+        }
         setEscalaCompleta(data);
       } catch (error) {
         console.error("Erro ao carregar escala:", error);
@@ -67,12 +74,11 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
     return diffDiferenca > 0 && diffDiferenca <= 30;
   };
 
-  // Lógica de ordenação: Futuro no topo, Passado no final
+  // Ordem Inteligente: Futuro em cima, Passado embaixo
   const viagensOrdenadas = escalaCompleta?.escala_viagens?.sort((a: any, b: any) => {
     const horaAtualStr = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const horaA = a.deslocamento_inicial || "00:00";
     const horaB = b.deslocamento_inicial || "00:00";
-
     const jaPassouA = horaA < horaAtualStr;
     const jaPassouB = horaB < horaAtualStr;
 
@@ -89,11 +95,14 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
       Motorista: v.motorista_nome_snapshot,
       RE: v.motorista_re_snapshot,
       Cliente: v.cliente,
+      Turno: v.turno || '---',
       Linha: v.linha,
       Desloc_Inicial: v.deslocamento_inicial,
       Inicio: v.inicio,
       Fim: v.fim,
-      Duracao: v.duracao_hhmm || v.duracao
+      Desloc_Final: v.deslocamento_final,
+      Duracao: v.duracao_hhmm || v.duracao,
+      Carro: v.carro
     })));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Escala");
@@ -136,13 +145,13 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
           </div>
         </div>
 
-        {/* Alerta */}
+        {/* Alerta de Urgência */}
         {temViagemUrgente && (
           <div className="bg-red-600 text-white p-4 rounded-xl shadow-lg flex items-center gap-4 animate-pulse">
             <AlertTriangle className="size-8" />
             <div>
               <p className="font-black text-lg text-white">ATENÇÃO: VIAGENS PRÓXIMAS AO INÍCIO</p>
-              <p className="text-sm opacity-90 text-white/90">Verifique os horários em destaque vermelho na lista.</p>
+              <p className="text-sm opacity-90 text-white/90">Linhas Em Destaque Com inicio Previsto Para 30 Minutos.</p>
             </div>
           </div>
         )}
@@ -152,13 +161,10 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
           <CardHeader className="bg-white border-b flex flex-row items-center justify-between py-4">
             <CardTitle className="text-slate-700 flex items-center gap-2 text-base font-bold">
               <Clock className="size-5 text-blue-500" /> 
-              Fluxo de Início de Turno (Próximas Linhas no Topo)
+              Monitoramento em Tempo Real
             </CardTitle>
-            <div className="flex items-center gap-4">
-               <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded">
-                Hora Atual: {agora.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
-               </span>
-               <span className="text-xs font-medium text-slate-400">{viagensOrdenadas.length} Viagens Total</span>
+            <div className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded">
+              Hora Atual: {agora.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
             </div>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -167,9 +173,11 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-[200px] font-bold text-slate-600">Motorista (RE)</TableHead>
                   <TableHead className="w-[180px] font-bold text-slate-600">Cliente / Linha</TableHead>
+                  <TableHead className="w-[80px] font-bold text-slate-600">Turno</TableHead>
                   <TableHead className="text-center font-bold text-orange-600 bg-orange-50/30">Desloc. Inicial</TableHead>
                   <TableHead className="text-center font-bold text-slate-600">Início Linha</TableHead>
                   <TableHead className="text-center font-bold text-slate-600">Fim</TableHead>
+                  <TableHead className="text-center font-bold text-orange-600 bg-orange-50/30">Desloc. Final</TableHead>
                   <TableHead className="text-center font-bold text-blue-700 bg-blue-50/30">Duração</TableHead>
                   <TableHead className="text-center font-bold text-slate-600">Carro</TableHead>
                 </TableRow>
@@ -177,14 +185,15 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
               <TableBody className="bg-white">
                 {viagensOrdenadas.map((v: any, idx: number) => {
                   const urgente = estaProximo(v.deslocamento_inicial);
-                  const jaPassou = (v.deslocamento_inicial || "00:00") < agora.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+                  const horaFormatada = agora.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+                  const jaPassou = (v.deslocamento_inicial || "00:00") < horaFormatada;
                   
                   return (
                     <TableRow 
                       key={v.id || idx} 
                       className={`transition-all duration-500 border-b ${
                         urgente 
-                        ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600 animate-in fade-in' 
+                        ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' 
                         : jaPassou 
                           ? 'opacity-50 grayscale-[0.5] bg-slate-50/50' 
                           : 'hover:bg-slate-50'
@@ -196,22 +205,43 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
                         </div>
                         <div className="text-[10px] text-slate-500">RE: {v.motorista_re_snapshot}</div>
                       </TableCell>
+
                       <TableCell>
                         <div className="font-semibold text-xs text-blue-900 uppercase">{v.cliente}</div>
                         <div className="text-[11px] text-slate-500 truncate max-w-[150px]">{v.linha}</div>
                       </TableCell>
-                      <TableCell className={`text-center font-black text-sm ${urgente ? 'text-red-600' : jaPassou ? 'text-slate-400' : 'text-orange-600'}`}>
+
+                      <TableCell>
+                        <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200 font-bold text-[10px] uppercase">
+                          {v.turno || '---'}
+                        </Badge>
+                      </TableCell>
+
+                      {/* MOVIMENTO SOMENTE AQUI NO DESLOCAMENTO INICIAL */}
+                      <TableCell className={`text-center font-black text-sm relative ${
+                        urgente 
+                        ? 'text-red-600 animate-pulse scale-110' // Movimento de pulsação e destaque no horário
+                        : jaPassou ? 'text-slate-400' : 'text-orange-600'
+                      }`}>
                         {v.deslocamento_inicial?.slice(0, 5) || '--:--'}
                       </TableCell>
+
                       <TableCell className="text-center font-medium text-slate-700">
                         {v.inicio?.slice(0, 5) || '--:--'}
                       </TableCell>
+
                       <TableCell className="text-center font-medium text-slate-700">
                         {v.fim?.slice(0, 5) || '--:--'}
                       </TableCell>
+
+                      <TableCell className={`text-center font-medium text-sm ${jaPassou ? 'text-slate-400' : 'text-orange-600'}`}>
+                        {v.deslocamento_final?.slice(0, 5) || '--:--'}
+                      </TableCell>
+
                       <TableCell className="text-center font-bold text-blue-700 bg-blue-50/10">
                         {v.duracao_hhmm || v.duracao || '--:--'}
                       </TableCell>
+
                       <TableCell className="text-center font-bold text-slate-900">
                         {v.carro || '---'}
                       </TableCell>
@@ -223,7 +253,7 @@ export function VisualizarEscala({ dados, onBack }: VisualizarEscalaProps) {
           </CardContent>
         </Card>
 
-        {/* Copyright Ajustado */}
+        {/* Rodapé */}
         <div className="mt-8 flex flex-col items-center justify-center border-t border-slate-200 pt-6 pb-4">
           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
             © {new Date().getFullYear()} SISTEMA DE GESTÃO MAXTOUR - TODOS OS DIREITOS RESERVADOS (JOÃO VITOR SILVA FERREIRA)

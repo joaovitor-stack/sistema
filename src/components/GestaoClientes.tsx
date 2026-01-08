@@ -6,7 +6,11 @@ import { Building2, Plus, Search, Trash2, X, Save, Loader2 } from 'lucide-react'
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { toast } from 'sonner';
-import { supabase } from '../lib/supabase'; // Importação do Supabase
+// importado anteriormente: import { supabase } from '../lib/supabase';
+// Como agora consumimos a API Express, removemos a dependência direta do Supabase.
+
+// Definimos a URL base da API; ajuste a porta se o backend estiver em outra porta.
+const API_URL = 'http://localhost:3333';
 
 interface Cliente {
   id: string;
@@ -26,34 +30,19 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
   const [novoCliente, setNovoCliente] = useState({ nome: '', cnpj: '' });
   const [loading, setLoading] = useState(false);
 
-  // Carregar dados do Supabase
+  // Carregar dados via API
   async function carregarClientes() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .select(`
-          id, 
-          nome, 
-          cnpj, 
-          cliente_status (status)
-        `)
-        .order('nome', { ascending: true });
-
-      if (error) throw error;
-
-      if (data) {
-        // Mapeia o resultado para o formato esperado pela interface
-        const formatados: Cliente[] = data.map((item: any) => ({
-          id: item.id,
-          nome: item.nome,
-          cnpj: item.cnpj || '',
-          status: item.cliente_status?.status || 'Ativo'
-        }));
-        setClientes(formatados);
+      const response = await fetch(`${API_URL}/clientes`);
+      if (!response.ok) {
+        throw new Error('Não foi possível obter dados do servidor.');
       }
+      const data = await response.json();
+      // A API retorna diretamente um array de clientes já formatados.
+      setClientes(Array.isArray(data) ? data : []);
     } catch (error: any) {
-      toast.error("Erro ao carregar clientes: " + error.message);
+      toast.error('Erro ao carregar clientes: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -66,52 +55,59 @@ export function GestaoClientes({ onVoltar }: GestaoClientesProps) {
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoCliente.nome || !novoCliente.cnpj) {
-      toast.error("Preencha todos os campos!");
+      toast.error('Preencha todos os campos!');
       return;
     }
 
     setLoading(true);
     try {
-      // De acordo com seu SQL, status_id 1 = Ativo
-      const { error } = await supabase
-        .from('clientes')
-        .insert([
-          { 
-            nome: novoCliente.nome, 
-            cnpj: novoCliente.cnpj,
-            status_id: 1 
-          }
-        ]);
-
-      if (error) throw error;
-
-      toast.success("Cliente cadastrado no banco!");
+      const response = await fetch(`${API_URL}/clientes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: novoCliente.nome,
+          cnpj: novoCliente.cnpj,
+        }),
+      });
+      if (!response.ok) {
+        let errMsg = 'Erro ao salvar no servidor.';
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+      toast.success('Cliente cadastrado no banco!');
       setNovoCliente({ nome: '', cnpj: '' });
       setIsCriando(false);
-      carregarClientes(); // Recarrega a lista atualizada
+      carregarClientes();
     } catch (error: any) {
-      toast.error("Erro ao salvar: " + error.message);
+      toast.error('Erro ao salvar: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
   const removerCliente = async (id: string) => {
-    if (!confirm("Deseja remover este cliente permanentemente?")) return;
+    if (!confirm('Deseja remover este cliente permanentemente?')) return;
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('clientes')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
-      toast.success("Cliente removido do banco.");
+      const response = await fetch(`${API_URL}/clientes/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        let errMsg = 'Erro ao remover no servidor.';
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+      toast.success('Cliente removido do banco.');
       carregarClientes();
     } catch (error: any) {
-      toast.error("Erro ao remover: " + error.message);
+      toast.error('Erro ao remover: ' + error.message);
     } finally {
       setLoading(false);
     }

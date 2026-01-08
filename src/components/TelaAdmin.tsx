@@ -6,8 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Trash2, Edit, Search, ShieldCheck, Users, Eye, Clock, PlusCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { UserRole, Usuario } from '../types'; 
-import { supabase } from '../lib/supabase'; // Importação do Supabase
+import { UserRole } from '../types';
+
+// Centralização da URL da sua API
+const API_URL = "http://localhost:3333/api";
 
 interface TelaAdminProps {
   onVoltar: () => void;
@@ -30,10 +32,8 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
   // Estados do Formulário
   const [novoNome, setNovoNome] = useState('');
   const [novoEmail, setNovoEmail] = useState('');
-  const [novoRole, setNovoRole] = useState<string>(''); // UUID do cargo
+  const [novoRole, setNovoRole] = useState<string>(''); 
   const [novaSenha, setNovaSenha] = useState('');
-  
-  // Estado para controle de edição
   const [editandoId, setEditandoId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,26 +43,24 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
   async function carregarDados() {
     setLoading(true);
     try {
-      // 1. Carrega os cargos (IDs) do banco
-      const { data: roles } = await supabase.from('roles_usuario').select('*');
+      // 1. Carrega usuários e cargos da nossa API Node.js
+      const [resUsers, resRoles] = await Promise.all([
+        fetch(`${API_URL}/usuarios`),
+        fetch(`${API_URL}/usuarios/roles`)
+      ]);
+
+      const users = await resUsers.json();
+      const roles = await resRoles.json();
+
       if (roles) {
         setRolesDisponiveis(roles);
         // Define RH como padrão se nada estiver selecionado
-        const rhRole = roles.find(r => r.codigo === 'recursos-humanos');
+        const rhRole = roles.find((r: any) => r.codigo === 'recursos-humanos');
         if (rhRole && !novoRole) setNovoRole(rhRole.id);
       }
-
-      // 2. Carrega usuários com join para pegar o código do cargo
-      const { data: users } = await supabase
-        .from('perfis_usuarios')
-        .select(`
-          id, nome, email, ativo, role_id,
-          roles_usuario (codigo)
-        `);
-      
       if (users) setUsuarios(users);
     } catch (error) {
-      toast.error("Erro ao carregar dados do banco.");
+      toast.error("Erro ao carregar dados do servidor.");
     } finally {
       setLoading(false);
     }
@@ -82,41 +80,23 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
     }
 
     setLoading(true);
-
     try {
-      if (editandoId) {
-        // EDIÇÃO
-        const { error } = await supabase
-          .from('perfis_usuarios')
-          .update({ nome: novoNome, email: novoEmail, role_id: novoRole })
-          .eq('id', editandoId);
-
-        if (error) throw error;
-        toast.success("Usuário atualizado no banco!");
-      } else {
-        // CRIAÇÃO (Auth + Perfil)
-        const { data: authData, error: authError } = await supabase.auth.signUp({
+      const response = await fetch(`${API_URL}/usuarios`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editandoId, // Se houver ID, o backend faz update. Se não, faz create.
+          nome: novoNome,
           email: novoEmail,
-          password: novaSenha,
-        });
+          role_id: novoRole,
+          senha: novaSenha
+        })
+      });
 
-        if (authError) throw authError;
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Erro ao salvar");
 
-        if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('perfis_usuarios')
-            .insert({
-              id: authData.user.id,
-              nome: novoNome,
-              email: novoEmail,
-              role_id: novoRole,
-              ativo: true
-            });
-          if (profileError) throw profileError;
-        }
-        toast.success("Usuário criado com sucesso!");
-      }
-      
+      toast.success(editandoId ? "Usuário atualizado!" : "Usuário criado!");
       limparFormulario();
       await carregarDados();
     } catch (error: any) {
@@ -136,20 +116,21 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
   };
 
   const handleExcluirUsuario = async (id: string) => {
-    if (confirm("Deseja remover este acesso permanentemente do banco?")) {
-      const { error } = await supabase.from('perfis_usuarios').delete().eq('id', id);
-      if (error) {
-        toast.error("Erro ao deletar: " + error.message);
-      } else {
-        toast.success("Usuário removido");
-        carregarDados();
-      }
+    if (!confirm("Deseja remover este acesso permanentemente?")) return;
+    try {
+      const response = await fetch(`${API_URL}/usuarios/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error("Erro ao excluir usuário");
+      
+      toast.success("Usuário removido");
+      carregarDados();
+    } catch (error: any) {
+      toast.error(error.message);
     }
   };
 
   const usuariosFiltrados = usuarios.filter(u => 
-    u.nome.toLowerCase().includes(busca.toLowerCase()) || 
-    u.email.toLowerCase().includes(busca.toLowerCase())
+    u.nome?.toLowerCase().includes(busca.toLowerCase()) || 
+    u.email?.toLowerCase().includes(busca.toLowerCase())
   );
 
   return (
@@ -160,12 +141,12 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold">Administração de Usuários</h1>
-            <p className="text-slate-500">Gerencie usuários e permissões no Supabase</p>
+            <p className="text-slate-500">Gestão Max Tour</p>
           </div>
           <Button variant="outline" onClick={onVoltar} className="bg-white border-slate-300">Voltar</Button>
         </div>
 
-        {/* NÍVEIS DE ACESSO (LAYOUT ORIGINAL MANTIDO) */}
+        {/* NÍVEIS DE ACESSO */}
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="text-base font-bold flex items-center gap-2">
@@ -175,23 +156,23 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
           <CardContent className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="p-4 rounded-xl border border-purple-100 bg-purple-50/30 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 text-purple-700 font-bold mb-1"><ShieldCheck className="size-4" /> Admin</div>
-              <p className="text-[10px] text-purple-600/80 font-medium">Acesso total a todas funcionalidades</p>
+              <p className="text-[10px] text-purple-600/80 font-medium">Acesso total</p>
             </div>
             <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/30 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 text-blue-700 font-bold mb-1"><Users className="size-4" /> Escalante</div>
-              <p className="text-[10px] text-blue-600/80 font-medium">Pode criar, apagar, editar e duplicar escalas</p>
+              <p className="text-[10px] text-blue-600/80 font-medium">Gestão completa de escalas</p>
             </div>
             <div className="p-4 rounded-xl border border-orange-100 bg-orange-50/30 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 text-orange-700 font-bold mb-1"><PlusCircle className="size-4" /> Extra</div>
-              <p className="text-[10px] text-orange-600/80 font-medium">Gestão exclusiva de viagens extras</p>
+              <p className="text-[10px] text-orange-600/80 font-medium">Viagens extras</p>
             </div>
             <div className="p-4 rounded-xl border border-amber-100 bg-amber-50/30 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 text-amber-700 font-bold mb-1"><Clock className="size-4" /> Plantão</div>
-              <p className="text-[10px] text-amber-600/80 font-medium">Visualização de escalas e gestão de folgas</p>
+              <p className="text-[10px] text-amber-600/80 font-medium">Visualização</p>
             </div>
             <div className="p-4 rounded-xl border border-green-100 bg-green-50/30 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 text-green-700 font-bold mb-1"><Eye className="size-4" /> RH</div>
-              <p className="text-[10px] text-green-600/80 font-medium">Visualização de escalas e gestão de folgas</p>
+              <p className="text-[10px] text-green-600/80 font-medium">Gestão de Folgas</p>
             </div>
           </CardContent>
         </Card>
@@ -207,16 +188,16 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div className="space-y-2">
                 <label className="text-sm font-bold text-slate-700">Nome Completo</label>
-                <Input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome do usuário" className="bg-white border-slate-300 shadow-sm" />
+                <Input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome do usuário" className="bg-white border-slate-300" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-bold text-slate-700">Email</label>
-                <Input value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} placeholder="usuario@maxtour.com" className="bg-white border-slate-300 shadow-sm" />
+                <Input value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} placeholder="usuario@maxtour.com" className="bg-white border-slate-300" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-bold text-slate-700">Nível de Acesso</label>
                 <Select value={novoRole} onValueChange={setNovoRole}>
-                  <SelectTrigger className="bg-white border-slate-300 shadow-sm text-slate-900">
+                  <SelectTrigger className="bg-white border-slate-300 text-slate-900">
                     <SelectValue placeholder="Selecione o nível" />
                   </SelectTrigger>
                   <SelectContent className="bg-white">
@@ -230,11 +211,11 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-bold text-slate-700">Senha {editandoId && "(vazio para manter)"}</label>
-                <Input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="********" className="bg-white border-slate-300 shadow-sm" />
+                <Input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="********" className="bg-white border-slate-300" />
               </div>
             </div>
             <div className="flex gap-3">
-              <Button onClick={handleSalvarUsuario} disabled={loading} className="bg-blue-600 hover:bg-blue-700 px-8 font-bold">
+              <Button onClick={handleSalvarUsuario} disabled={loading} className="bg-blue-600 hover:bg-blue-700 px-8 font-bold text-white">
                 {loading && <Loader2 className="animate-spin mr-2 size-4" />}
                 {editandoId ? 'Salvar Alterações' : 'Criar Usuário'}
               </Button>
@@ -251,23 +232,23 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
             <CardTitle className="text-base font-bold">Usuários do Sistema</CardTitle>
             <div className="relative w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-              <Input placeholder="Pesquisar..." className="pl-10 bg-white border-slate-300 shadow-sm" value={busca} onChange={(e) => setBusca(e.target.value)} />
+              <Input placeholder="Pesquisar..." className="pl-10 bg-white border-slate-300" value={busca} onChange={(e) => setBusca(e.target.value)} />
             </div>
           </div>
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead className="font-bold">Nome</TableHead>
+                <TableHead className="font-bold px-6">Nome</TableHead>
                 <TableHead className="font-bold">Email</TableHead>
                 <TableHead className="font-bold text-center">Nível</TableHead>
                 <TableHead className="font-bold text-center">Status</TableHead>
-                <TableHead className="text-right font-bold">Ações</TableHead>
+                <TableHead className="text-right font-bold px-6">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {usuariosFiltrados.map((user) => (
                 <TableRow key={user.id} className="hover:bg-slate-50/50 bg-white">
-                  <TableCell className="font-medium">{user.nome}</TableCell>
+                  <TableCell className="font-medium px-6">{user.nome}</TableCell>
                   <TableCell className="text-slate-500">{user.email}</TableCell>
                   <TableCell className="text-center">
                     <span className={`px-3 py-1 rounded-md text-[10px] font-bold border uppercase ${
@@ -285,12 +266,12 @@ export function TelaAdmin({ onVoltar }: TelaAdminProps) {
                       <div className="size-1.5 bg-green-600 rounded-full" /> Ativo
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right px-6">
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => handleIniciarEdicao(user)} className="bg-white border-slate-200 text-slate-700 h-8 font-bold shadow-sm">
+                      <Button variant="outline" size="sm" onClick={() => handleIniciarEdicao(user)} className="bg-white border-slate-200 text-slate-700 h-8 font-bold">
                         <Edit className="size-3.5 mr-1" /> Editar
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleExcluirUsuario(user.id)} className="bg-red-50 border-red-200 text-red-600 hover:bg-red-100 h-8 font-bold shadow-sm">
+                      <Button variant="outline" size="sm" onClick={() => handleExcluirUsuario(user.id)} className="bg-red-50 border-red-200 text-red-600 hover:bg-red-100 h-8 font-bold">
                         <Trash2 className="size-3.5 mr-1" /> Deletar
                       </Button>
                     </div>

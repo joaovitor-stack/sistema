@@ -4,10 +4,12 @@ import { Card, CardContent, CardHeader } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"; 
-import { ArrowLeft, Search, CalendarDays, Plus, Trash2, Loader2, Filter } from 'lucide-react';
+import { ArrowLeft, Search, CalendarDays, Plus, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../types';
-import { supabase } from '../lib/supabase';
+
+// URL da sua API centralizada
+const API_URL = "http://localhost:3333/api";
 
 interface TelaFolgasProps {
   onVoltar: () => void;
@@ -24,8 +26,7 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
   const [saving, setSaving] = useState(false);
   const [mostrarForm, setMostrarForm] = useState(false);
 
-  // Estados do formulário
-  const [garagemFiltroId, setGaragemFiltroId] = useState(''); // Filtro para motoristas
+  const [garagemFiltroId, setGaragemFiltroId] = useState(''); 
   const [motoristaSelecionado, setMotoristaSelecionado] = useState<any>(null);
   const [novaData, setNovaData] = useState('');
 
@@ -38,29 +39,30 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
   async function fetchDados() {
     try {
       setLoading(true);
-      const [m, g, f] = await Promise.all([
-        supabase.from('motoristas').select('*').order('nome'),
-        supabase.from('garagens').select('*').order('nome'),
-        supabase.from('folgas').select(`
-          *,
-          motoristas (nome, numero_registro),
-          garagens (nome)
-        `).order('data_folga', { ascending: false })
+      // Agora buscamos da nossa API Node.js
+      const [resM, resG, resF] = await Promise.all([
+        fetch(`${API_URL}/motoristas`),
+        fetch(`${API_URL}/garagens`),
+        fetch(`${API_URL}/folgas`)
       ]);
 
-      setMotoristas(m.data || []);
-      setGaragens(g.data || []);
-      setFolgas(f.data || []);
+      const [m, g, f] = await Promise.all([
+        resM.json(), resG.json(), resF.json()
+      ]);
+
+      setMotoristas(m || []);
+      setGaragens(g || []);
+      setFolgas(f || []);
     } catch (error: any) {
-      toast.error("Erro ao carregar dados: " + error.message);
+      toast.error("Erro ao carregar dados do servidor.");
     } finally {
       setLoading(false);
     }
   }
 
-  // Quando seleciona o motorista, pegamos o objeto completo dele
   const handleSelecionarMotorista = (id: string) => {
-    const mot = motoristas.find(m => m.id === id);
+    // Usando String() para garantir a comparação correta de IDs
+    const mot = motoristas.find(m => String(m.id) === String(id));
     setMotoristaSelecionado(mot);
   };
 
@@ -70,24 +72,25 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
       return;
     }
 
-    const jaExiste = folgas.some(
-      f => f.motorista_id === motoristaSelecionado.id && f.data_folga === novaData
-    );
-
-    if (jaExiste) {
-      toast.error("Este motorista já possui uma folga registrada para este dia!");
-      return;
-    }
-
     try {
       setSaving(true);
-      const { error } = await supabase.from('folgas').insert([{
-        motorista_id: motoristaSelecionado.id,
-        garagem_id: motoristaSelecionado.garagem_id, // Usa a garagem do cadastro do motorista
-        data_folga: novaData
-      }]);
+      
+      const response = await fetch(`${API_URL}/folgas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          motorista_id: motoristaSelecionado.id,
+          garagem_id: motoristaSelecionado.garagem_id,
+          data_folga: novaData
+        })
+      });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Exibe a mensagem de erro vinda do backend (ex: motorista já tem folga)
+        throw new Error(data.error || "Erro ao salvar folga");
+      }
 
       toast.success("Folga registrada!");
       setMostrarForm(false);
@@ -95,7 +98,7 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
       setNovaData('');
       fetchDados();
     } catch (error: any) {
-      toast.error("Erro ao salvar: " + error.message);
+      toast.error(error.message);
     } finally {
       setSaving(false);
     }
@@ -104,8 +107,12 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
   const handleExcluirFolga = async (id: string) => {
     if (!confirm("Deseja excluir esta folga?")) return;
     try {
-      const { error } = await supabase.from('folgas').delete().eq('id', id);
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/folgas/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error("Erro ao excluir no servidor");
+
       toast.success("Registro removido.");
       fetchDados();
     } catch (error: any) {
@@ -114,7 +121,7 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
   };
 
   const motoristasFiltradosPelaGaragem = garagemFiltroId 
-    ? motoristas.filter(m => m.garagem_id === garagemFiltroId)
+    ? motoristas.filter(m => String(m.garagem_id) === String(garagemFiltroId))
     : [];
 
   const filtradosTabela = folgas.filter(f => 
@@ -138,12 +145,11 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
           <Card className="mb-6 border-blue-200 bg-blue-50/50 shadow-sm animate-in fade-in zoom-in-95">
             <CardContent className="pt-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
-                {/* 1. Selecionar Garagem primeiro para filtrar */}
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">1. Filtrar Garagem</label>
                   <Select value={garagemFiltroId} onValueChange={(val) => {
                     setGaragemFiltroId(val);
-                    setMotoristaSelecionado(null); // Limpa motorista se mudar garagem
+                    setMotoristaSelecionado(null);
                   }}>
                     <SelectTrigger className="bg-white border-slate-300">
                       <SelectValue placeholder="Selecione a garagem..." />
@@ -156,7 +162,6 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
                   </Select>
                 </div>
 
-                {/* 2. Selecionar Motorista (apenas daquela garagem) */}
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">2. Motorista</label>
                   <Select 
@@ -175,7 +180,6 @@ export function TelaFolgas({ onVoltar, userRole }: TelaFolgasProps) {
                   </Select>
                 </div>
                 
-                {/* RE automático e separado */}
                 <div className="md:col-span-1">
                   <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">RE do Motorista</label>
                   <div className="h-10 px-3 flex items-center bg-slate-100 border border-slate-300 rounded-md font-mono font-bold text-slate-600">

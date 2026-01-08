@@ -7,7 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Plus, Trash2, ArrowLeft, BusFront, Search, FileDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
-import { supabase } from '../lib/supabase';
+
+// URL da sua API Node.js
+const API_URL = "http://localhost:3333/api";
 
 interface ViagemExtra {
   id: string;
@@ -61,23 +63,27 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
   async function fetchDados() {
     try {
       setLoading(true);
-      const [v, c, l, g, t, s, tv] = await Promise.all([
-        supabase.from('viagens_extras').select('*').order('data_viagem', { ascending: false }),
-        supabase.from('clientes').select('*').order('nome'),
-        supabase.from('linhas').select('*').order('codigo'),
-        supabase.from('garagens').select('*').order('nome'),
-        supabase.from('turnos').select('*').order('codigo'),
-        supabase.from('sentidos').select('*').order('codigo'),
-        supabase.from('tipos_veiculo').select('*').order('nome'),
+      const [resV, resC, resL, resG, resT, resS, resTV] = await Promise.all([
+        fetch(`${API_URL}/viagens-extras`),
+        fetch(`${API_URL}/clientes`),
+        fetch(`${API_URL}/linhas`),
+        fetch(`${API_URL}/garagens`),
+        fetch(`${API_URL}/turnos`),
+        fetch(`${API_URL}/sentidos`),
+        fetch(`${API_URL}/tipos-veiculo`),
       ]);
 
-      setViagens(v.data || []);
-      setClientes(c.data || []);
-      setLinhas(l.data || []);
-      setGaragens(g.data || []);
-      setTurnos(t.data || []);
-      setSentidos(s.data || []);
-      setTiposVeiculo(tv.data || []);
+      const [v, c, l, g, t, s, tv] = await Promise.all([
+        resV.json(), resC.json(), resL.json(), resG.json(), resT.json(), resS.json(), resTV.json()
+      ]);
+
+      setViagens(v || []);
+      setClientes(c || []);
+      setLinhas(l || []);
+      setGaragens(g || []);
+      setTurnos(t || []);
+      setSentidos(s || []);
+      setTiposVeiculo(tv || []);
     } catch (error: any) {
       toast.error("Erro ao carregar dados: " + error.message);
     } finally {
@@ -97,7 +103,7 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
       const cliNome = clientes.find(c => c.id === novaViagem.cliente_id)?.nome || '';
       const linCod = linhas.find(l => l.id === novaViagem.linha_id)?.codigo || '';
 
-      const { error } = await supabase.from('viagens_extras').insert([{
+      const dadosParaEnviar = {
         data_viagem: novaViagem.data_viagem,
         garagem_id: novaViagem.garagem_id,
         cliente_id: novaViagem.cliente_id,
@@ -111,12 +117,19 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
         inicio: novaViagem.inicio,
         tipo_veiculo_id: novaViagem.tipo_veiculo_id,
         carro: novaViagem.carro || ''
-      }]);
+      };
 
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/viagens-extras`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dadosParaEnviar)
+      });
+
+      if (!response.ok) throw new Error("Erro ao salvar no servidor");
+
       toast.success("Viagem extra registrada!");
       setMostrarForm(false);
-      setNovaViagem({ turno_codigo: 'Extra', linha_id: null });
+      setNovaViagem({ turno_codigo: 'Extra', linha_id: null, descricao: '', motivo_viagem: '' });
       fetchDados();
     } catch (error: any) {
       toast.error("Erro ao salvar: " + error.message);
@@ -128,8 +141,12 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
   const excluirViagem = async (id: string) => {
     if (!confirm("Deseja realmente excluir este registro?")) return;
     try {
-      const { error } = await supabase.from('viagens_extras').delete().eq('id', id);
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/viagens-extras/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error("Erro ao excluir no servidor");
+
       toast.success("Registro removido!");
       fetchDados();
     } catch (error: any) {
@@ -143,7 +160,6 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
     return `${dia}/${mes}/${ano}`;
   };
 
-  // Exportação ajustada conforme o modelo do arquivo enviado
   const exportarExcel = () => {
     if (viagens.length === 0) return;
 
@@ -161,7 +177,6 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
       const chave = `${nomeGaragem}|${nomeCliente}|${nomeSentido}|${v.linha}|${v.turno_codigo}|${v.motivo_viagem}|${v.descricao}|${nomeVeiculo}`;
       
       if (!consolidado[chave]) {
-        // Ordem das colunas conforme o seu arquivo CSV
         consolidado[chave] = { 
           Garagem: nomeGaragem,
           Cliente: nomeCliente, 
@@ -172,7 +187,6 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
           Descrição: v.descricao,
           Veiculo: nomeVeiculo 
         };
-        // Inicializa as colunas de data
         datasFormatadas.forEach(df => consolidado[chave][df] = 0);
       }
       consolidado[chave][dataCol] += 1;
@@ -182,7 +196,7 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Relatório Geral");
     XLSX.writeFile(wb, "Escala_Viagens_Extras.xlsx");
-    toast.success("Excel gerado no padrão solicitado!");
+    toast.success("Excel gerado com sucesso!");
   };
 
   return (
@@ -235,16 +249,24 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
                     onValueChange={val => {
                       const id = val === 'none' ? null : val;
                       const linhaObj = linhas.find(l => l.id === id);
-                      setNovaViagem({...novaViagem, linha_id: id, descricao: linhaObj?.nome || novaViagem.descricao});
+                      setNovaViagem({
+                        ...novaViagem, 
+                        linha_id: id, 
+                        descricao: linhaObj?.nome || novaViagem.descricao
+                      });
                     }}
                     disabled={!novaViagem.cliente_id}
                   >
                     <SelectTrigger className="bg-white"><SelectValue placeholder="Cod." /></SelectTrigger>
                     <SelectContent className="bg-white">
                       <SelectItem value="none">Nenhuma / Manual</SelectItem>
-                      {linhas.filter(l => l.cliente_id === novaViagem.cliente_id).map(l => (
-                        <SelectItem key={l.id} value={l.id}>{l.codigo}</SelectItem>
-                      ))}
+                      {/* CORREÇÃO AQUI: String() garante a comparação correta entre IDs */}
+                      {linhas
+                        .filter(l => String(l.cliente_id) === String(novaViagem.cliente_id))
+                        .map(l => (
+                          <SelectItem key={l.id} value={l.id}>{l.codigo}</SelectItem>
+                        ))
+                      }
                     </SelectContent>
                   </Select>
                 </div>
@@ -318,7 +340,12 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
           <CardHeader className="bg-white border-b py-4 flex flex-row items-center justify-between">
             <div className="relative w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-              <Input placeholder="Filtrar por cliente ou garagem..." className="pl-10 h-10" value={busca} onChange={e => setBusca(e.target.value)} />
+              <Input 
+                placeholder="Filtrar por cliente, garagem ou motivo..." 
+                className="pl-10 h-10" 
+                value={busca} 
+                onChange={e => setBusca(e.target.value)} 
+              />
             </div>
             {!mostrarForm && (
               <Button onClick={() => setMostrarForm(true)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold h-10 px-6">
@@ -341,10 +368,14 @@ export function CriarViagemExtra({ onBack }: { onBack: () => void }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody className="bg-white">
-                  {viagens.filter(v => 
-                    v.cliente.toLowerCase().includes(busca.toLowerCase()) || 
-                    garagens.find(g => g.id === v.garagem_id)?.nome.toLowerCase().includes(busca.toLowerCase())
-                  ).map((v) => (
+                  {viagens.filter(v => {
+                    const termo = busca.toLowerCase();
+                    const nomeGaragem = garagens.find(g => g.id === v.garagem_id)?.nome.toLowerCase() || "";
+                    const cliente = v.cliente?.toLowerCase() || "";
+                    const motivo = v.motivo_viagem?.toLowerCase() || "";
+                    const desc = v.descricao?.toLowerCase() || "";
+                    return cliente.includes(termo) || nomeGaragem.includes(termo) || motivo.includes(termo) || desc.includes(termo);
+                  }).map((v) => (
                     <TableRow key={v.id} className="hover:bg-slate-50 border-b last:border-none transition-colors">
                       <TableCell className="px-6 py-4">
                         <span className="text-base font-black text-slate-800">{formatarDataSimples(v.data_viagem)}</span>

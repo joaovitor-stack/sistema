@@ -12,7 +12,6 @@ import {
   Bus, PlusCircle, MapPinned, ArrowLeft, 
   Edit3, Calendar as CalendarIcon, Filter, Loader2, TrendingUp
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 
 interface DashboardProps {
   onBack: () => void;
@@ -34,10 +33,16 @@ export function TelaDashboard({ onBack }: DashboardProps) {
   const [clientesData, setClientesData] = useState<any[]>([]);
   const [totais, setTotais] = useState({ viagens: 0, extras: 0, itinerarios: 0, atualizados: 0 });
 
+  // Busca lista de garagens através da sua API
   useEffect(() => {
     async function buscarGaragens() {
-      const { data } = await supabase.from('garagens').select('nome').order('nome');
-      if (data) setListaGaragens(['TODAS', ...data.map(g => g.nome)]);
+      try {
+        const response = await fetch('http://localhost:3333/api/dashboard/garagens');
+        const data = await response.json();
+        if (data) setListaGaragens(['TODAS', ...data.map((g: any) => g.nome)]);
+      } catch (error) {
+        console.error("Erro ao buscar garagens:", error);
+      }
     }
     buscarGaragens();
   }, []);
@@ -56,63 +61,27 @@ export function TelaDashboard({ onBack }: DashboardProps) {
   const carregarDados = async () => {
     setLoading(true);
     try {
-      // 1. QUERY ESCALAS (CORRIGIDA: Removemos o aninhamento que causava erro 400)
-      let queryEscalas = supabase.from('escalas').select(`
-        data_escala,
-        garagens!inner(nome),
-        escala_viagens(id, cliente)
-      `);
+      // CONSTRUÇÃO DA URL COM FILTROS PARA A NOVA API
+      const params = new URLSearchParams();
+      if (garagemFiltro !== 'TODAS') params.append('garagem', garagemFiltro);
+      if (dataInicio) params.append('dataInicio', dataInicio);
+      if (dataFim) params.append('dataFim', dataFim);
 
-      // 2. QUERY EXTRAS
-      let queryExtras = supabase.from('viagens_extras').select(`
-        data_viagem,
-        garagens!inner(nome),
-        cliente
-      `);
-
-      // 3. QUERY ITINERÁRIOS (Corrigida para buscar criação e atualização por Garagem)
-      let queryItinerarios = supabase.from('itinerarios').select(`
-        data_ultima_atualizacao,
-        created_at,
-        garagens!inner(nome)
-      `);
-
-      // Filtros de Data (Aplicados apenas às viagens, pois itinerários checamos no loop)
-      if (dataInicio) {
-        queryEscalas = queryEscalas.gte('data_escala', dataInicio);
-        queryExtras = queryExtras.gte('data_viagem', dataInicio);
-      }
-      if (dataFim) {
-        queryEscalas = queryEscalas.lte('data_escala', dataFim);
-        queryExtras = queryExtras.lte('data_viagem', dataFim);
-      }
-
-      // Filtro de Garagem (Aplicado a todas as queries)
-      if (garagemFiltro !== 'TODAS') {
-        queryEscalas = queryEscalas.eq('garagens.nome', garagemFiltro);
-        queryExtras = queryExtras.eq('garagens.nome', garagemFiltro);
-        queryItinerarios = queryItinerarios.eq('garagens.nome', garagemFiltro);
-      }
-
-      const [resEscalas, resExtras, resItin] = await Promise.all([
-        queryEscalas, queryExtras, queryItinerarios
-      ]);
-
-      if (resEscalas.error) throw resEscalas.error;
-      if (resExtras.error) throw resExtras.error;
-      if (resItin.error) throw resItin.error;
+      // Chamada única para o backend
+      const response = await fetch(`http://localhost:3333/api/dashboard/stats?${params.toString()}`);
+      const { escalas, extras, itinerarios } = await response.json();
 
       const resumo: any = {};
       const porGaragem: any = {};
       const porCliente: any = {};
       let tViagens = 0;
       let tExtras = 0;
-      let tMovimentacoesItinerario = 0; // Soma de criados + atualizados
+      let tMovimentacoesItinerario = 0;
 
       listaGaragens.filter(g => g !== 'TODAS').forEach(g => porGaragem[g] = 0);
 
-      // --- PROCESSAR ESCALAS FIXAS ---
-      resEscalas.data?.forEach((esc: any) => {
+      // --- PROCESSAR ESCALAS FIXAS (Vindo da API) ---
+      escalas?.forEach((esc: any) => {
         const dataISO = esc.data_escala;
         const gNome = esc.garagens.nome;
         const chave = visao === 'DIARIO' ? dataISO : dataISO.substring(0, 7);
@@ -131,8 +100,8 @@ export function TelaDashboard({ onBack }: DashboardProps) {
         });
       });
 
-      // --- PROCESSAR VIAGENS EXTRAS ---
-      resExtras.data?.forEach((ext: any) => {
+      // --- PROCESSAR VIAGENS EXTRAS (Vindo da API) ---
+      extras?.forEach((ext: any) => {
         const dataISO = ext.data_viagem;
         const gNome = ext.garagens.nome;
         const chave = visao === 'DIARIO' ? dataISO : dataISO.substring(0, 7);
@@ -148,12 +117,11 @@ export function TelaDashboard({ onBack }: DashboardProps) {
         porCliente[cNome].total += 1;
       });
 
-      // --- PROCESSAR ITINERÁRIOS (CRIAÇÃO E ATUALIZAÇÃO) ---
-      resItin.data?.forEach((itin: any) => {
+      // --- PROCESSAR ITINERÁRIOS (Vindo da API) ---
+      itinerarios?.forEach((itin: any) => {
         const dataAtualizacao = itin.data_ultima_atualizacao;
         const dataCriacao = itin.created_at ? itin.created_at.split('T')[0] : null;
         
-        // Verifica se houve movimentação no período selecionado
         const atualizadoNoPeriodo = dataAtualizacao && 
           (!dataInicio || dataAtualizacao >= dataInicio) && 
           (!dataFim || dataAtualizacao <= dataFim);
@@ -163,7 +131,6 @@ export function TelaDashboard({ onBack }: DashboardProps) {
           (!dataFim || dataCriacao <= dataFim);
 
         if (atualizadoNoPeriodo || criadoNoPeriodo) {
-          // Usa a data relevante para o gráfico
           const dataRelevante = atualizadoNoPeriodo ? dataAtualizacao : dataCriacao;
           const chave = visao === 'DIARIO' ? dataRelevante : dataRelevante.substring(0, 7);
           
@@ -174,6 +141,7 @@ export function TelaDashboard({ onBack }: DashboardProps) {
         }
       });
 
+      // ATUALIZAÇÃO DOS ESTADOS DOS GRÁFICOS (Mantendo sua lógica original)
       setStats(Object.values(resumo).sort((a: any, b: any) => new Date(a.data).getTime() - new Date(b.data).getTime()));
       setPieData(Object.keys(porGaragem).map(k => ({ name: k, value: porGaragem[k] })).filter(i => i.value > 0));
       setClientesData(Object.values(porCliente).sort((a: any, b: any) => b.total - a.total));
@@ -182,11 +150,11 @@ export function TelaDashboard({ onBack }: DashboardProps) {
         viagens: tViagens, 
         extras: tExtras, 
         atualizados: tMovimentacoesItinerario, 
-        itinerarios: resItin.data?.length || 0 // Total Base da Garagem (sem filtro de data)
+        itinerarios: itinerarios?.length || 0 
       });
 
     } catch (error) {
-      console.error("Erro ao carregar dashboard:", error);
+      console.error("Erro ao carregar dashboard pela API:", error);
     } finally {
       setLoading(false);
     }
@@ -202,7 +170,7 @@ export function TelaDashboard({ onBack }: DashboardProps) {
             <div className="flex items-center gap-4">
               <Button variant="outline" onClick={onBack} size="icon" className="rounded-full"><ArrowLeft className="size-5" /></Button>
               <div>
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Gestão Maxtour</h1>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Gestão Max Tour</h1>
                 <div className="flex gap-4 mt-1">
                   <button onClick={() => setAbaAtiva('GERAL')} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all ${abaAtiva === 'GERAL' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`}>Indicadores Gerais</button>
                   <button onClick={() => setAbaAtiva('CLIENTES')} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all ${abaAtiva === 'CLIENTES' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`}>Visão por Clientes</button>
@@ -237,11 +205,11 @@ export function TelaDashboard({ onBack }: DashboardProps) {
         {loading ? (
           <div className="h-96 flex flex-col items-center justify-center gap-3">
             <Loader2 className="animate-spin text-blue-600 size-10" />
-            <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sincronizando Banco...</p>
+            <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sincronizando Banco via API...</p>
           </div>
         ) : (
           <>
-            {/* ABA 1: GERAL */}
+            {/* ABA 1: GERAL (Estrutura mantida) */}
             {abaAtiva === 'GERAL' && (
               <div className="animate-in fade-in duration-500 space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -312,7 +280,7 @@ export function TelaDashboard({ onBack }: DashboardProps) {
               </div>
             )}
 
-            {/* ABA 2: CLIENTES */}
+            {/* ABA 2: CLIENTES (Estrutura mantida) */}
             {abaAtiva === 'CLIENTES' && (
               <div className="animate-in fade-in duration-500 space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
