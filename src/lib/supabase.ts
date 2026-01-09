@@ -1,8 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Essas informações você encontra no painel do Supabase em:
-// Project Settings > API
-const supabaseUrl = 'https://lciwsmrabmhckpybwpzi.supabase.co'; 
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxjaXdzbXJhYm1oY2tweWJ3cHppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcwMTg4NjMsImV4cCI6MjA4MjU5NDg2M30.Y5hoJ-ArJHHtjMrkwHMjuwXS6rVgif4WNjhskOzxWBk';
+// O Vite exige o prefixo VITE_ e o uso de import.meta.env para acessar variáveis de ambiente
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Verificação de segurança para ajudar no debug caso as variáveis não sejam carregadas
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("Erro: Variáveis de ambiente do Supabase não foram encontradas. Verifique o arquivo .env ou as configurações na Vercel.");
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
