@@ -140,7 +140,6 @@ export function CriarNovaEscala({
           supabase.from('turnos').select('*').order('descricao'),
           supabase.from('sentidos').select('*').order('descricao'),
           supabase.from('categorias_motorista').select('*').order('nome'),
-          // Carros: selecionamos prefixo, garagem_id e tipo_veiculo_id. Ativo se existir
           supabase
             .from('veiculos')
             .select('id, prefixo, garagem_id, tipo_veiculo_id, ativo')
@@ -353,22 +352,33 @@ export function CriarNovaEscala({
     }
   };
 
+  // ==========================================
+  // AJUSTE 1: Validação da Garagem
+  // ==========================================
   const validarAntesDeSalvar = () => {
     if (!dataEscala || !garagemId) {
       toast.error('Preencha a Data e a Garagem!');
       return;
     }
     const codigosNaEscala = linhas.map((l) => l.linha);
-    const faltantes = todasLinhasCadastradas.filter(
+    
+    // Filtra primeiro as linhas que pertencem à garagem selecionada
+    // Se garagem_id for null no banco, assumimos que não deve ser validado ou ajusta conforme regra
+    const linhasDaGaragem = todasLinhasCadastradas.filter(
+        (lc) => lc.garagem_id === garagemId
+    );
+
+    // Agora verifica quais dessas estão faltando
+    const faltantes = linhasDaGaragem.filter(
       (lc) => !codigosNaEscala.includes(lc.codigo)
     );
+
     setLinhasFaltantesParaExibir(faltantes);
     setShowConfirmModal(true);
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      {/* ... (Dialog de confirmação mantido igual) */}
       <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
         <DialogContent className="bg-white max-w-md">
           <DialogHeader>
@@ -379,7 +389,7 @@ export function CriarNovaEscala({
               {linhasFaltantesParaExibir.length > 0 ? (
                 <div>
                   <p className="font-bold text-orange-600 mb-2 flex items-center gap-1">
-                    <AlertTriangle className="size-4" /> Linhas ausentes no itinerário:
+                    <AlertTriangle className="size-4" /> Linhas desta garagem ausentes:
                   </p>
                   <div className="max-h-40 overflow-y-auto bg-slate-50 p-2 rounded border border-slate-200">
                     {linhasFaltantesParaExibir.map((lf, idx) => {
@@ -509,7 +519,6 @@ export function CriarNovaEscala({
                 <TableHead className="min-w-[180px]">Descrição</TableHead>
                 <TableHead className="min-w-[110px]">Sentido</TableHead>
                 <TableHead className="min-w-[110px]">Turno</TableHead>
-                {/* ADIÇÃO: Cabeçalhos das novas colunas */}
                 <TableHead className="min-w-[100px] text-orange-600">
                   D. Inicial
                 </TableHead>
@@ -568,6 +577,10 @@ export function CriarNovaEscala({
                       </SelectContent>
                     </Select>
                   </TableCell>
+                  
+                  {/* ========================================== */}
+                  {/* AJUSTE 2: Filtragem de Linhas por Garagem  */}
+                  {/* ========================================== */}
                   <TableCell>
                     <Select
                       value={linha.linha || ''}
@@ -581,7 +594,11 @@ export function CriarNovaEscala({
                       </SelectTrigger>
                       <SelectContent className="bg-white">
                         {todasLinhasCadastradas
-                          .filter((lc) => lc.cliente_id === linha.cliente)
+                          .filter(
+                            (lc) => 
+                                lc.cliente_id === linha.cliente && 
+                                lc.garagem_id === garagemId // FILTRO NOVO AQUI
+                          )
                           .map((lc) => (
                             <SelectItem key={lc.id} value={lc.codigo}>
                               {lc.codigo}
@@ -590,6 +607,7 @@ export function CriarNovaEscala({
                       </SelectContent>
                     </Select>
                   </TableCell>
+
                   <TableCell>
                     <Input
                       value={linha.descricao || ''}
@@ -635,7 +653,6 @@ export function CriarNovaEscala({
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  {/* Deslocamento Inicial */}
                   <TableCell>
                     <Input
                       type="time"
@@ -650,7 +667,6 @@ export function CriarNovaEscala({
                       className="h-8 text-xs border-orange-200 focus:border-orange-400"
                     />
                   </TableCell>
-                  {/* Início */}
                   <TableCell>
                     <Input
                       type="time"
@@ -661,7 +677,6 @@ export function CriarNovaEscala({
                       className="h-8 text-xs"
                     />
                   </TableCell>
-                  {/* Fim */}
                   <TableCell>
                     <Input
                       type="time"
@@ -672,7 +687,6 @@ export function CriarNovaEscala({
                       className="h-8 text-xs"
                     />
                   </TableCell>
-                  {/* Deslocamento Final */}
                   <TableCell>
                     <Input
                       type="time"
@@ -687,7 +701,6 @@ export function CriarNovaEscala({
                       className="h-8 text-xs border-orange-200 focus:border-orange-400"
                     />
                   </TableCell>
-                  {/* Duração */}
                   <TableCell>
                     <Input
                       value={linha.duracao || ''}
@@ -695,7 +708,6 @@ export function CriarNovaEscala({
                       className="bg-blue-50 font-bold h-8 text-xs text-blue-700 border-blue-200"
                     />
                   </TableCell>
-                  {/* Tipo de veículo */}
                   <TableCell>
                     <Select
                       value={linha.tipo || ''}
@@ -743,17 +755,11 @@ export function CriarNovaEscala({
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  {/* Campo Carro (Select) */}
                   <TableCell>
                     <Select
-                      /*
-                       * Para o campo "carro", usamos um valor sentinela quando não há veículo selecionado.
-                       * O Radix Select não permite value="", então usamos SEM_CARRO_VALUE como placeholder.
-                       */
                       value={linha.carro || SEM_CARRO_VALUE}
                       onValueChange={(val) => {
                         if (val === SEM_CARRO_VALUE) {
-                          // Se selecionar a opção "Sem veículo", limpamos o campo carro
                           handleUpdateLinha(linha.id, 'carro', '');
                         } else {
                           handleUpdateLinha(linha.id, 'carro', val);
@@ -769,20 +775,16 @@ export function CriarNovaEscala({
                         />
                       </SelectTrigger>
                       <SelectContent className="bg-white">
-                        {/* opção "sem veículo" usando o sentinela */}
                         <SelectItem value={SEM_CARRO_VALUE}>Sem veículo</SelectItem>
-                        {/* Listagem de veículos disponíveis */}
                         {linha.nomeMotorista ? (
                           (() => {
-                            // Primeiro, obtemos a lista de tipos de veículo permitidos pela categoria do motorista
                             const tiposPermitidos = tiposVeiculoPermitidosParaMotorista(
                               linha.nomeMotorista
                             );
-                            // Encontramos o ID do tipo de veículo selecionado no campo "tipo" desta linha
                             const tipoSelecionadoId = veiculosBanco.find(
                               (t) => t.nome === linha.tipo
                             )?.id;
-                            // Se não há tipo selecionado ou nenhum tipo permitido, retornamos mensagem apropriada
+
                             if (!tipoSelecionadoId || tiposPermitidos.length === 0) {
                               return (
                                 <SelectItem value="__none" disabled>
@@ -790,14 +792,12 @@ export function CriarNovaEscala({
                                 </SelectItem>
                               );
                             }
-                            // Filtramos a lista de veículos físicos (carrosBanco) por garagem e tipo
                             const veiculosDisponiveis = carrosBanco.filter(
                               (c) =>
                                 c.garagem_id === garagemId &&
                                 c.tipo_veiculo_id === tipoSelecionadoId &&
                                 (c.ativo === null || c.ativo === true)
                             );
-                            // Se não houver veículos disponíveis, mostramos mensagem
                             if (veiculosDisponiveis.length === 0) {
                               return (
                                 <SelectItem value="__none" disabled>
@@ -805,7 +805,6 @@ export function CriarNovaEscala({
                                 </SelectItem>
                               );
                             }
-                            // Caso contrário, mostramos as opções de prefixo
                             return veiculosDisponiveis.map((c) => (
                               <SelectItem key={c.id} value={c.prefixo}>
                                 {c.prefixo}
@@ -820,24 +819,21 @@ export function CriarNovaEscala({
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  {/* Nº Registro */}
                   <TableCell>
                     <Input
                       value={linha.numeroRegistro || ''}
                       readOnly
-                      className="h-8 text-xs bg-gray-50"
+                      className="h-8 text-xs bg-gray-50 text-center"
                     />
                   </TableCell>
-                  {/* Ações */}
                   <TableCell>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        setLinhas((prev) =>
-                          prev.filter((l) => l.id !== linha.id)
-                        )
-                      }
+                      onClick={() => {
+                        const novaLista = linhas.filter((li) => li.id !== linha.id);
+                        setLinhas(novaLista);
+                      }}
                     >
                       <Trash2 className="size-4 text-red-500" />
                     </Button>

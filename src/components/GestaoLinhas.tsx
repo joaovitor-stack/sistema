@@ -7,11 +7,9 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { toast } from 'sonner';
-// importado anteriormente: import { supabase } from '../lib/supabase';
-// Removido pois agora buscamos dados via API Express.
 
-// Definimos a URL base da API; ajuste conforme a porta do backend.
-const API_URL = 'http://localhost:3333';
+// IMPORTANTE: Para a Vercel, mude para variável de ambiente
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333';
 
 interface LinhaCadastrada {
   id: string;
@@ -19,6 +17,8 @@ interface LinhaCadastrada {
   nome: string;
   clienteId: string;
   clienteNome: string;
+  garagemId: string;     // Adicionado
+  garagemNome: string;   // Adicionado
 }
 
 export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
@@ -26,9 +26,12 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
   const [loading, setLoading] = useState(false);
   const [linhas, setLinhas] = useState<LinhaCadastrada[]>([]);
   const [clientesCadastrados, setClientesCadastrados] = useState<{id: string, nome: string}[]>([]);
-  const [novaLinha, setNovaLinha] = useState({ codigo: '', nome: '', clienteId: '' });
+  const [garagensCadastradas, setGaragensCadastradas] = useState<{id: string, nome: string}[]>([]); // Adicionado
+  
+  // Atualizado com garagemId
+  const [novaLinha, setNovaLinha] = useState({ codigo: '', nome: '', clienteId: '', garagemId: '' });
 
-  // Carregar dados via API (clientes e linhas)
+  // Carregar dados via API (clientes, linhas e agora garagens)
   async function carregarDados() {
     setLoading(true);
     try {
@@ -37,8 +40,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
         throw new Error('Não foi possível obter dados do servidor.');
       }
       const data = await response.json();
-      // data deve ter propriedades: clientes e linhas
+      
       setClientesCadastrados(Array.isArray(data.clientes) ? data.clientes : []);
+      setGaragensCadastradas(Array.isArray(data.garagens) ? data.garagens : []); // Adicionado
       setLinhas(Array.isArray(data.linhas) ? data.linhas : []);
     } catch (error: any) {
       toast.error('Erro ao carregar dados: ' + error.message);
@@ -54,8 +58,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!novaLinha.codigo || !novaLinha.clienteId || !novaLinha.nome) {
-      toast.error("Preencha todos os campos!");
+    // Validação atualizada
+    if (!novaLinha.codigo || !novaLinha.clienteId || !novaLinha.nome || !novaLinha.garagemId) {
+      toast.error("Preencha todos os campos, incluindo a garagem!");
       return;
     }
 
@@ -68,6 +73,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
           codigo: novaLinha.codigo,
           nome: novaLinha.nome,
           cliente_id: novaLinha.clienteId,
+          garagem_id: novaLinha.garagemId, // Adicionado
         }),
       });
       if (!response.ok) {
@@ -80,7 +86,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
       }
       toast.success('Linha cadastrada com sucesso!');
       setIsCriando(false);
-      setNovaLinha({ codigo: '', nome: '', clienteId: '' });
+      setNovaLinha({ codigo: '', nome: '', clienteId: '', garagemId: '' });
       carregarDados();
     } catch (error: any) {
       toast.error('Erro ao salvar: ' + error.message);
@@ -134,7 +140,8 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               </Button>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSalvar} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              {/* Grid ajustado para 5 colunas para caber a Garagem */}
+              <form onSubmit={handleSalvar} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                 <div className="space-y-2">
                   <Label>Selecione o Cliente</Label>
                   <Select 
@@ -150,6 +157,24 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* NOVO CAMPO: Selecionar Garagem */}
+                <div className="space-y-2">
+                  <Label>Garagem</Label>
+                  <Select 
+                    value={novaLinha.garagemId}
+                    onValueChange={(val) => setNovaLinha({...novaLinha, garagemId: val})}
+                    disabled={loading}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Escolha a garagem" /></SelectTrigger>
+                    <SelectContent>
+                      {garagensCadastradas.map(g => (
+                        <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="space-y-2">
                   <Label>Cód. Linha</Label>
                   <Input 
@@ -191,6 +216,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
+                  <TableHead>Garagem</TableHead> {/* Nova Coluna na Tabela */}
                   <TableHead>Código da Linha</TableHead>
                   <TableHead>Descrição</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
@@ -199,7 +225,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               <TableBody>
                 {loading && linhas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10">
+                    <TableCell colSpan={5} className="text-center py-10">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto text-green-600" />
                     </TableCell>
                   </TableRow>
@@ -207,6 +233,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                   linhas.map(l => (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium text-blue-700">{l.clienteNome}</TableCell>
+                      <TableCell className="text-slate-600 font-semibold">{l.garagemNome}</TableCell> {/* Nome da Garagem */}
                       <TableCell className="font-bold">{l.codigo}</TableCell>
                       <TableCell>{l.nome}</TableCell>
                       <TableCell className="text-right">
