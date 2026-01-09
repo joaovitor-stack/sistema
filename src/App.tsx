@@ -13,7 +13,7 @@ import { supabase } from './lib/supabase';
 /** * AJUSTE IMPORTANTE: 
  * Como você acessa via 10.100.30.190, o backend deve seguir o mesmo IP.
  */
-const API_URL = 'https://sistema-omega-ten.vercel.app/:3333';
+const API_URL = 'http://10.100.30.155:3333';
 
 export default function App() {
   const [email, setEmail] = useState('');
