@@ -17,21 +17,34 @@ interface LinhaCadastrada {
   nome: string;
   clienteId: string;
   clienteNome: string;
-  garagemId: string;     // Adicionado
-  garagemNome: string;   // Adicionado
+  garagemId: string;
+  garagemNome: string;
+  turnoNome: string;   // Adicionado
+  sentidoNome: string; // Adicionado
 }
 
 export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
   const [isCriando, setIsCriando] = useState(false);
   const [loading, setLoading] = useState(false);
   const [linhas, setLinhas] = useState<LinhaCadastrada[]>([]);
-  const [clientesCadastrados, setClientesCadastrados] = useState<{id: string, nome: string}[]>([]);
-  const [garagensCadastradas, setGaragensCadastradas] = useState<{id: string, nome: string}[]>([]); // Adicionado
   
-  // Atualizado com garagemId
-  const [novaLinha, setNovaLinha] = useState({ codigo: '', nome: '', clienteId: '', garagemId: '' });
+  // Listas para os Selects
+  const [clientesCadastrados, setClientesCadastrados] = useState<{id: string, nome: string}[]>([]);
+  const [garagensCadastradas, setGaragensCadastradas] = useState<{id: string, nome: string}[]>([]);
+  const [turnosCadastrados, setTurnosCadastrados] = useState<{id: string, descricao: string}[]>([]);     // Ajustado para descricao
+  const [sentidosCadastrados, setSentidosCadastrados] = useState<{id: string, descricao: string}[]>([]); // Ajustado para descricao
+  
+  // Estado do formulário atualizado
+  const [novaLinha, setNovaLinha] = useState({ 
+    codigo: '', 
+    nome: '', 
+    clienteId: '', 
+    garagemId: '', 
+    turnoId: '',    // Novo
+    sentidoId: ''   // Novo
+  });
 
-  // Carregar dados via API (clientes, linhas e agora garagens)
+  // Carregar dados via API
   async function carregarDados() {
     setLoading(true);
     try {
@@ -42,7 +55,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
       const data = await response.json();
       
       setClientesCadastrados(Array.isArray(data.clientes) ? data.clientes : []);
-      setGaragensCadastradas(Array.isArray(data.garagens) ? data.garagens : []); // Adicionado
+      setGaragensCadastradas(Array.isArray(data.garagens) ? data.garagens : []);
+      setTurnosCadastrados(Array.isArray(data.turnos) ? data.turnos : []);     // Preenche select Turnos
+      setSentidosCadastrados(Array.isArray(data.sentidos) ? data.sentidos : []); // Preenche select Sentidos
       setLinhas(Array.isArray(data.linhas) ? data.linhas : []);
     } catch (error: any) {
       toast.error('Erro ao carregar dados: ' + error.message);
@@ -59,8 +74,8 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
     e.preventDefault();
     
     // Validação atualizada
-    if (!novaLinha.codigo || !novaLinha.clienteId || !novaLinha.nome || !novaLinha.garagemId) {
-      toast.error("Preencha todos os campos, incluindo a garagem!");
+    if (!novaLinha.codigo || !novaLinha.clienteId || !novaLinha.nome || !novaLinha.garagemId || !novaLinha.turnoId || !novaLinha.sentidoId) {
+      toast.error("Preencha todos os campos, incluindo turno e sentido!");
       return;
     }
 
@@ -73,7 +88,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
           codigo: novaLinha.codigo,
           nome: novaLinha.nome,
           cliente_id: novaLinha.clienteId,
-          garagem_id: novaLinha.garagemId, // Adicionado
+          garagem_id: novaLinha.garagemId,
+          turno_id: novaLinha.turnoId,     // Enviando Turno
+          sentido_id: novaLinha.sentidoId  // Enviando Sentido
         }),
       });
       if (!response.ok) {
@@ -86,7 +103,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
       }
       toast.success('Linha cadastrada com sucesso!');
       setIsCriando(false);
-      setNovaLinha({ codigo: '', nome: '', clienteId: '', garagemId: '' });
+      setNovaLinha({ codigo: '', nome: '', clienteId: '', garagemId: '', turnoId: '', sentidoId: '' });
       carregarDados();
     } catch (error: any) {
       toast.error('Erro ao salvar: ' + error.message);
@@ -140,16 +157,16 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               </Button>
             </CardHeader>
             <CardContent>
-              {/* Grid ajustado para 5 colunas para caber a Garagem */}
-              <form onSubmit={handleSalvar} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+              {/* Grid ajustado para comportar os novos campos */}
+              <form onSubmit={handleSalvar} className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4 items-end">
                 <div className="space-y-2">
-                  <Label>Selecione o Cliente</Label>
+                  <Label>Cliente</Label>
                   <Select 
                     value={novaLinha.clienteId}
                     onValueChange={(val) => setNovaLinha({...novaLinha, clienteId: val})}
                     disabled={loading}
                   >
-                    <SelectTrigger><SelectValue placeholder="Escolha um cliente" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                     <SelectContent>
                       {clientesCadastrados.map(c => (
                         <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
@@ -158,7 +175,6 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                   </Select>
                 </div>
 
-                {/* NOVO CAMPO: Selecionar Garagem */}
                 <div className="space-y-2">
                   <Label>Garagem</Label>
                   <Select 
@@ -166,10 +182,44 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                     onValueChange={(val) => setNovaLinha({...novaLinha, garagemId: val})}
                     disabled={loading}
                   >
-                    <SelectTrigger><SelectValue placeholder="Escolha a garagem" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                     <SelectContent>
                       {garagensCadastradas.map(g => (
                         <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* NOVO CAMPO: Turno */}
+                <div className="space-y-2">
+                  <Label>Turno</Label>
+                  <Select 
+                    value={novaLinha.turnoId}
+                    onValueChange={(val) => setNovaLinha({...novaLinha, turnoId: val})}
+                    disabled={loading}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Turno" /></SelectTrigger>
+                    <SelectContent>
+                      {turnosCadastrados.map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.descricao}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* NOVO CAMPO: Sentido */}
+                <div className="space-y-2">
+                  <Label>Sentido</Label>
+                  <Select 
+                    value={novaLinha.sentidoId}
+                    onValueChange={(val) => setNovaLinha({...novaLinha, sentidoId: val})}
+                    disabled={loading}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Sentido" /></SelectTrigger>
+                    <SelectContent>
+                      {sentidosCadastrados.map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.descricao}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -180,11 +230,11 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                   <Input 
                     value={novaLinha.codigo} 
                     onChange={e => setNovaLinha({...novaLinha, codigo: e.target.value})} 
-                    placeholder="Ex: ROTA-01" 
+                    placeholder="ROTA-01" 
                     disabled={loading}
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 lg:col-span-2">
                   <Label>Descrição da Rota</Label>
                   <Input 
                     value={novaLinha.nome} 
@@ -193,9 +243,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                     disabled={loading}
                   />
                 </div>
-                <Button type="submit" className="bg-green-600 text-white hover:bg-green-700" disabled={loading}>
+                <Button type="submit" className="bg-green-600 text-white hover:bg-green-700 lg:col-span-1" disabled={loading}>
                   {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Salvar Linha
+                  Salvar
                 </Button>
               </form>
             </CardContent>
@@ -216,8 +266,10 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
-                  <TableHead>Garagem</TableHead> {/* Nova Coluna na Tabela */}
-                  <TableHead>Código da Linha</TableHead>
+                  <TableHead>Garagem</TableHead>
+                  <TableHead>Turno</TableHead>
+                  <TableHead>Sentido</TableHead>
+                  <TableHead>Código</TableHead>
                   <TableHead>Descrição</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
@@ -225,7 +277,7 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
               <TableBody>
                 {loading && linhas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-10">
+                    <TableCell colSpan={7} className="text-center py-10">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto text-green-600" />
                     </TableCell>
                   </TableRow>
@@ -233,7 +285,9 @@ export function GestaoLinhas({ onVoltar }: { onVoltar: () => void }) {
                   linhas.map(l => (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium text-blue-700">{l.clienteNome}</TableCell>
-                      <TableCell className="text-slate-600 font-semibold">{l.garagemNome}</TableCell> {/* Nome da Garagem */}
+                      <TableCell className="text-slate-600 font-semibold">{l.garagemNome}</TableCell>
+                      <TableCell className="text-orange-600 font-medium">{l.turnoNome}</TableCell>
+                      <TableCell className="text-slate-600 italic">{l.sentidoNome}</TableCell>
                       <TableCell className="font-bold">{l.codigo}</TableCell>
                       <TableCell>{l.nome}</TableCell>
                       <TableCell className="text-right">
