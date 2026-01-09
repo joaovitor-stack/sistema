@@ -144,9 +144,10 @@ export default function PainelMotorista() {
                     <p><b>Cliente:</b> {v.cliente}</p>
                     <p><b>Descrição:</b> {v.descricao}</p>
                     
-                    <div className="flex justify-between pt-2 mt-2 border-t border-dashed border-slate-200">
+                    <div className="flex flex-wrap gap-2 pt-2 mt-2 border-t border-dashed border-slate-200">
                       <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-semibold">Carro: {v.carro}</span>
                       <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-semibold">Turno: {v.turno_codigo}</span>
+                      <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-semibold">Duração: {v.duracao}</span>
                     </div>
                   </div>
                 </div>
